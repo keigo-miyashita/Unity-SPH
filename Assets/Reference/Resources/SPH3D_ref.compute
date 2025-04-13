@@ -1,6 +1,7 @@
 ﻿// Each #kernel tells which function to compile; you can have many kernels
 #pragma kernel DensityCS
-#pragma kernel PressureCS
+#pragma kernel PressureCompressibleCS
+#pragma kernel PressureWeakCompressibleCS
 #pragma kernel ForceCS
 #pragma kernel IntegrateCS
 
@@ -49,6 +50,7 @@ cbuffer CB {
     int    _NumParticles;       // 粒子数
     float  _TimeStep;           // 時間刻み幅 (dt)
     float  _Smoothlen;          // 粒子半径
+    float  _GasConstant;        // ガス定数
     float  _PressureStiffness;  // Tait 式の圧力定数
     float  _RestDensity;        // 静止密度
     float  _DensityCoef;        // 密度算出時に使うカーネル関数の係数
@@ -74,6 +76,13 @@ inline float CalculateDensity(
     return _DensityCoef * (h_sq - r_sq) * (h_sq - r_sq) * (h_sq - r_sq);
 }
 
+/// 圧力方程式の実装．（非圧縮性を考慮しない）
+inline float CalculateCompressiblePressure(
+    float density // 密度
+) {
+    return _GasConstant * (density - _RestDensity);
+}
+
 /// 微圧縮性の実装．（SPH は体積保存性が担保されない．これを改善するための手法）
 /// Tait 方程式に基づき小さな密度揺らぎを許容することで，非圧縮性を担保するためのポアソン方程式（計算に時間がかかる）を使わずに堆積保存性を改善する． 
 /// 参考：[Becker and Matthias 2007] Becker and Matthias: Weakly compressible SPH for free surface flows, SCA, July 2007
@@ -82,6 +91,7 @@ inline float CalculatePressure(
     float density // 密度
 ) {
     return _PressureStiffness * max(pow(density / _RestDensity, 7) - 1.0f, 0.0f);
+    // return _PressureStiffness * pow(density / _RestDensity, 7) - 1.0f;
 }
 
 /// Spiky カーネルの実装
@@ -95,7 +105,7 @@ inline float4 CalculateGradPressure(
 ) {
     const float h = _Smoothlen;
     float avg_pressure = 0.5f * (P_pressure + N_pressure);
-    return _GradPressureCoef * avg_pressure / N_density * (h - r) * (h - r) / r * diff;
+    return _GradPressureCoef * avg_pressure / (N_density + 0.001f) * (h - r) * (h - r) / (r + 0.001f) * diff;
 }
 
 /// Viscosity カーネルの実装
@@ -118,6 +128,9 @@ inline float4 CalculateLapViscosity(
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void DensityCS(uint3 DTid : SV_DispatchThreadID) {
     const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
+    if (P_ID > _NumParticles) {
+        return;
+    }
 
     float h_sq = _Smoothlen * _Smoothlen;
     float4 P_position = _ParticlesBufferRead[P_ID].position;
@@ -125,7 +138,7 @@ void DensityCS(uint3 DTid : SV_DispatchThreadID) {
     // 近傍探索 (O(n))
     float density = 0.0f;
     for (uint N_ID = 0; N_ID < _NumParticles; N_ID++) {
-        if (N_ID == P_ID) continue;     // 自身を計算対象とした場合スキップ
+        // if (N_ID == P_ID) continue;     // 自身を計算対象とした場合スキップ
 
         float4 N_position = _ParticlesBufferRead[N_ID].position;
 
@@ -142,13 +155,32 @@ void DensityCS(uint3 DTid : SV_DispatchThreadID) {
     _ParticlesDensityBufferWrite[P_ID].density = density;
 }
 
-
 //------------------------------------------------------------
-// 圧力の算出
+// 圧力の算出（圧縮性）
 // -----------------------------------------------------------
 [numthreads(THREAD_SIZE_X, 1, 1)]
-void PressureCS(uint3 DTid : SV_DispatchThreadID) {
+void PressureCompressibleCS(uint3 DTid : SV_DispatchThreadID) {
     const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
+    if (P_ID > _NumParticles) {
+        return;
+    }
+
+    float P_density = _ParticlesDensityBufferRead[P_ID].density;
+    float P_pressure = CalculateCompressiblePressure(P_density);
+
+    // 圧力バッファを更新．
+    _ParticlesPressureBufferWrite[P_ID].pressure = P_pressure;
+}
+
+//------------------------------------------------------------
+// 圧力の算出（弱圧縮性）
+// -----------------------------------------------------------
+[numthreads(THREAD_SIZE_X, 1, 1)]
+void PressureWeakCompressibleCS(uint3 DTid : SV_DispatchThreadID) {
+    const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
+    if (P_ID > _NumParticles) {
+        return;
+    }
 
     float P_density = _ParticlesDensityBufferRead[P_ID].density;
     float P_pressure = CalculatePressure(P_density);
@@ -164,6 +196,9 @@ void PressureCS(uint3 DTid : SV_DispatchThreadID) {
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void ForceCS(uint3 DTid : SV_DispatchThreadID) {
     const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
+    if (P_ID > _NumParticles) {
+        return;
+    }
 
     const float4 P_position = _ParticlesBufferRead[P_ID].position;
     const float4 P_velocity = _ParticlesBufferRead[P_ID].velocity;
@@ -176,7 +211,7 @@ void ForceCS(uint3 DTid : SV_DispatchThreadID) {
     float4 press = float4(0.0f, 0.0f, 0.0f, 0.0f);
     float4 visco = float4(0.0f, 0.0f, 0.0f, 0.0f);
     for (uint N_ID = 0; N_ID < _NumParticles; N_ID++) {
-        if (N_ID == P_ID) continue;     // 自身を計算対象とした場合スキップ
+        // if (N_ID == P_ID) continue;     // 自身を計算対象とした場合スキップ
 
         float4 N_position = _ParticlesBufferRead[N_ID].position;
 
@@ -190,7 +225,7 @@ void ForceCS(uint3 DTid : SV_DispatchThreadID) {
             float r = sqrt(r_sq);
 
             // 圧力項
-            press += CalculateGradPressure(r, P_pressure, N_pressure, N_density, diff);
+            press += CalculateGradPressure(r, P_pressure, N_pressure, N_density, -diff);
 
             // 粘性項
             visco += CalculateLapViscosity(r, P_velocity, N_velocity, N_density);
@@ -211,6 +246,9 @@ void ForceCS(uint3 DTid : SV_DispatchThreadID) {
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void IntegrateCS(uint3 DTid : SV_DispatchThreadID) {
     const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
+    if (P_ID > _NumParticles) {
+        return;
+    }
 
     // 更新前の位置と速度
     float4 position = _ParticlesBufferRead[P_ID].position;

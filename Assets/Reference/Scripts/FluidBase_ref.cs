@@ -38,17 +38,19 @@ namespace Reference
 
     public abstract class FluidBase_ref<T> : MonoBehaviour where T : struct
     {
-        [SerializeField] protected NumParticleEnum particleNum = NumParticleEnum.NUM_16K;   // パーティクルの個数．
-        [SerializeField] protected float smoothlen = 0.5f;                               // 粒子半径． 
+        [SerializeField] private int particleNum = 1024;   // パーティクルの個数．
+        [SerializeField] protected float smoothlen = 0.15f;                               // 粒子半径． 
+        [SerializeField] protected float gasConstant = 10.0f;                               // ガス定数．
         [SerializeField] private float pressureStiffness = 200.0f;                          // 圧力項係数．
         [SerializeField] protected float restDensity = 1000.0f;                             // 静止密度．
-        [SerializeField] protected float particleMass = 0.0002f;                           // 粒子質量．
-        [SerializeField] protected float viscosity = 0.1f;
+        [SerializeField] protected float particleMass = 0.02f;                           // 粒子質量．
+        [SerializeField] protected float viscosity = 1.04f;
         [SerializeField] protected float maxAllowableTimestep = 0.005f;
         [SerializeField] protected float wallStiffness = 3000.0f;
-        [SerializeField] protected int iterations = 4;
+        [SerializeField] protected int iterations = 5;
         [SerializeField] protected Vector3 gravity = new Vector3(0f, -9.8f, 0f);
-        [SerializeField] protected Vector3 range = new Vector3(1f, 1f, 1f);
+        [SerializeField] protected Vector3 range = new Vector3(6f, 6f, 6f);
+        [SerializeField] bool drawSimulationGrid = true;
 
         private int numParticles;                                                           // パーティクルの個数．
         private float timeStep;                                                             // 時間刻み幅．
@@ -86,11 +88,12 @@ namespace Reference
         protected virtual void Awake()
         {
             fluidCS = (ComputeShader)Resources.Load("SPH3D_ref");
-            numParticles = (int)particleNum;
         }
 
         protected virtual void Start()
         {
+            particleNum = CalculateNumParticles();
+            numParticles = particleNum;
             InitBuffers();
         }
 
@@ -109,6 +112,7 @@ namespace Reference
             fluidCS.SetInt("_NumParticles", numParticles);
             fluidCS.SetFloat("_TimeStep", timeStep);
             fluidCS.SetFloat("_Smoothlen", smoothlen);
+            fluidCS.SetFloat("_GasConstant", gasConstant);
             fluidCS.SetFloat("_PressureStiffness", pressureStiffness);
             fluidCS.SetFloat("_RestDensity", restDensity);
             fluidCS.SetFloat("_Viscosity", viscosity);
@@ -126,8 +130,6 @@ namespace Reference
             {
                 RunFluidSolver();
             }
-
-            
         }
 
         private void OnDestroy()
@@ -146,7 +148,7 @@ namespace Reference
         private void RunFluidSolver()
         {
             int kernelID = -1;
-            int threadGroupX = numParticles / THREAD_SIZE_X;
+            int threadGroupX = numParticles / THREAD_SIZE_X + 1;
 
             // 密度の計算
             kernelID = fluidCS.FindKernel("DensityCS");
@@ -154,8 +156,14 @@ namespace Reference
             fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferWrite", particlesDensityBuffer);
             fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
 
+            //// 圧力の計算
+            //kernelID = fluidCS.FindKernel("PressureWeakCompressibleCS");
+            //fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferRead", particlesDensityBuffer);
+            //fluidCS.SetBuffer(kernelID, "_ParticlesPressureBufferWrite", particlesPressureBuffer);
+            //fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
+
             // 圧力の計算
-            kernelID = fluidCS.FindKernel("PressureCS");
+            kernelID = fluidCS.FindKernel("PressureCompressibleCS");
             fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferRead", particlesDensityBuffer);
             fluidCS.SetBuffer(kernelID, "_ParticlesPressureBufferWrite", particlesPressureBuffer);
             fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
@@ -186,7 +194,13 @@ namespace Reference
         protected virtual void AdditionalCSParams(ComputeShader shader) { }
 
         /// <summary>
-        /// パーティクルの初期位置と初速の設定．
+        /// パーティクル数を求める．
+        /// </summary>
+        /// <param name="particles"></param>
+        protected abstract int CalculateNumParticles();
+
+        /// <summary>
+        /// パーティクルの初期位置，初速を初期化．
         /// </summary>
         /// <param name="particles"></param>
         protected abstract void InitParticleData(ref T[] particles);
