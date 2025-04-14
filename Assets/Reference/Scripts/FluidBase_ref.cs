@@ -2,7 +2,10 @@
 using System.Collections.Generic;
 using UnityEngine;
 using System.Runtime.InteropServices;
-
+using System;
+using Unity.Mathematics;
+using System.Text;
+using System.IO;
 
 namespace Reference
 {
@@ -36,6 +39,13 @@ namespace Reference
         public Vector4 Acceleration;
     }
 
+    struct Entry
+    {
+        public uint P_ID;
+        public uint hash;
+        public uint key;
+    }
+
     public abstract class FluidBase_ref<T> : MonoBehaviour where T : struct
     {
         [SerializeField] private int particleNum = 1024;   // パーティクルの個数．
@@ -58,6 +68,11 @@ namespace Reference
         private float gradPressureCoef;                                                     // Spiky カーネルの密度係数．
         private float lapViscosityCoef;                                                     // Laplacian カーネルの密度係数．
 
+        #region Debug
+        private uint frame = 0;
+
+        #endregion
+
         #region DirectConpute
         private ComputeShader fluidCS;
         private static readonly int THREAD_SIZE_X = 64;
@@ -66,6 +81,9 @@ namespace Reference
         private ComputeBuffer particlesPressureBuffer;
         private ComputeBuffer particlesDensityBuffer;
         private ComputeBuffer particlesForceBuffer;
+        private ComputeBuffer keyBuffer;
+        private ComputeBuffer LUTBuffer;
+        private ComputeBuffer loopCounterBuffer; // Debug
 
         #endregion
 
@@ -125,11 +143,21 @@ namespace Reference
 
             AdditionalCSParams(fluidCS);
 
+            if (frame == 0)
+            {
+                //CreateLookUpTable();
+                //RunFluidSolver();
+                //RunFluidSolverWithNeighborhoodSearch();
+            }
+
             // 複数回イテレーション．
             for (int i = 0; i < iterations; i++)
             {
-                RunFluidSolver();
+                //RunFluidSolver();
+                RunFluidSolverWithNeighborhoodSearch();
             }
+            //RunFluidSolverWithNeighborhoodSearch();
+            frame++;
         }
 
         private void OnDestroy()
@@ -139,8 +167,129 @@ namespace Reference
             DeleteBuffer(particlesPressureBuffer);
             DeleteBuffer(particlesDensityBuffer);
             DeleteBuffer(particlesForceBuffer);
+            DeleteBuffer(keyBuffer);
+            DeleteBuffer(LUTBuffer);
+            DeleteBuffer(loopCounterBuffer); // Debug
         }
         #endregion Mono
+
+        /// <summary>
+        /// 粒子へのアクセスを高速化するためのルックアップテーブルを用意
+        /// </summary>
+        private void CreateLookUpTable()
+        {
+            int kernelID = -1;
+            int threadGroupX = numParticles / THREAD_SIZE_X + 1;
+
+            // 密度の計算
+            kernelID = fluidCS.FindKernel("RegisterHashCS");
+            fluidCS.SetBuffer(kernelID, "_ParticlesBufferRead", particlesBufferRead);
+            fluidCS.SetBuffer(kernelID, "_KeyBuffer", keyBuffer);
+            fluidCS.SetBuffer(kernelID, "_LUTBuffer", LUTBuffer);
+            fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
+
+            Entry[] results = new Entry[numParticles];
+            keyBuffer.GetData(results);
+            //for (int i = 0; i < numParticles; i++)
+            //{
+            //    Debug.Log("result[" + i + "] = " + results[i].key);
+            //}
+            //string filePath = "output_before_after.txt";
+            //StringBuilder sb = new StringBuilder();
+            //sb.Append("entry.P_ID = ");
+            //foreach (Entry entry in results)
+            //{
+            //    sb.Append(entry.P_ID.ToString().PadLeft(6));
+            //    sb.Append(" ");
+            //}
+            //sb.AppendLine();
+            //sb.Append("entry.hash = ");
+            //foreach (Entry entry in results)
+            //{
+            //    sb.Append(entry.hash.ToString().PadLeft(6));
+            //    sb.Append(" ");
+            //}
+            //sb.AppendLine();
+            //sb.Append("entry.key  = ");
+            //foreach (Entry entry in results)
+            //{
+            //    sb.Append(entry.key.ToString().PadLeft(6));
+            //    sb.Append(" ");
+            //}
+            //sb.AppendLine();
+            Array.Sort(results, (a, b) => a.key.CompareTo(b.key));
+            //for (int i = 0; i < numParticles; i++)
+            //{
+            //    Debug.Log("result[" + i + "] = " + results[i].key + ", " + results[i].hash + ", " + results[i].P_ID);
+            //}
+            keyBuffer.SetData(results);
+            //sb.Append("entry.P_ID = ");
+            //foreach (Entry entry in results)
+            //{
+            //    sb.Append(entry.P_ID.ToString().PadLeft(6));
+            //    sb.Append(" ");
+            //}
+            //sb.AppendLine();
+            //sb.Append("entry.hash = ");
+            //foreach (Entry entry in results)
+            //{
+            //    sb.Append(entry.hash.ToString().PadLeft(6));
+            //    sb.Append(" ");
+            //}
+            //sb.AppendLine();
+            //sb.Append("entry.key  = ");
+            //foreach (Entry entry in results)
+            //{
+            //    sb.Append(entry.key.ToString().PadLeft(6));
+            //    sb.Append(" ");
+            //}
+            //sb.AppendLine();
+            //File.WriteAllText(filePath, sb.ToString());
+
+            kernelID = fluidCS.FindKernel("CalculateOffsetsCS");
+            fluidCS.SetBuffer(kernelID, "_KeyBuffer", keyBuffer);
+            fluidCS.SetBuffer(kernelID, "_LUTBuffer", LUTBuffer);
+            fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
+            uint[] offsets = new uint[numParticles];
+            LUTBuffer.GetData(offsets);
+
+            //string filePath = "output.txt";
+            //StringBuilder sb = new StringBuilder();
+            //sb.Append("entry.P_ID = ");
+            //foreach (Entry entry in results)
+            //{
+            //    sb.Append(entry.P_ID.ToString());
+            //    sb.Append(" ");
+            //}
+            //sb.AppendLine();
+            //sb.Append("entry.hash = ");
+            //foreach (Entry entry in results)
+            //{
+            //    sb.Append(entry.hash.ToString());
+            //    sb.Append(" ");
+            //}
+            //sb.AppendLine();
+            //sb.Append("entry.key  = ");
+            //foreach (Entry entry in results)
+            //{
+            //    sb.Append(entry.key.ToString());
+            //    sb.Append(" ");
+            //}
+            //sb.AppendLine();
+            //sb.Append("offset     = ");
+            //foreach (uint offset in offsets)
+            //{
+            //    sb.Append(offset.ToString().PadLeft(6));
+            //    sb.Append(" ");
+            //}
+            //sb.AppendLine();
+
+            //File.WriteAllText(filePath, sb.ToString());
+            //for (int i = 0; i < numParticles; i++)
+            //{
+            //    Debug.Log("outsets[" + i + "] = " + offsets[i]);
+            //}
+        }
 
         /// <summary>
         /// 流体シミュレーションメインルーチン
@@ -154,7 +303,33 @@ namespace Reference
             kernelID = fluidCS.FindKernel("DensityCS");
             fluidCS.SetBuffer(kernelID, "_ParticlesBufferRead", particlesBufferRead);
             fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferWrite", particlesDensityBuffer);
+            fluidCS.SetBuffer(kernelID, "_LoopCounterBuffer", loopCounterBuffer); // Debug
             fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
+
+            //FluidParticleDensity[] results = new FluidParticleDensity[numParticles];
+            //particlesDensityBuffer.GetData(results);
+            //string filePath = "output_density.txt";
+            //StringBuilder sb = new StringBuilder();
+            //sb.Append("result.Density = ");
+            //foreach (FluidParticleDensity result in results)
+            //{
+            //    sb.Append(result.Density.ToString());
+            //    sb.Append(" ");
+            //}
+            //sb.AppendLine();
+            //uint[] results = new uint[numParticles];
+            //loopCounterBuffer.GetData(results);
+            //string filePath = "output_density_counter.txt";
+            //StringBuilder sb = new StringBuilder();
+            //sb.Append("loopCounter = ");
+            //foreach (uint result in results)
+            //{
+            //    sb.Append(result.ToString());
+            //    sb.Append(" ");
+            //}
+            //sb.AppendLine();
+
+            //File.WriteAllText(filePath, sb.ToString());
 
             //// 圧力の計算
             //kernelID = fluidCS.FindKernel("PressureWeakCompressibleCS");
@@ -170,6 +345,96 @@ namespace Reference
 
             // 外力の計算
             kernelID = fluidCS.FindKernel("ForceCS");
+            fluidCS.SetBuffer(kernelID, "_ParticlesBufferRead", particlesBufferRead);
+            fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferRead", particlesDensityBuffer);
+            fluidCS.SetBuffer(kernelID, "_ParticlesPressureBufferRead", particlesPressureBuffer);
+            fluidCS.SetBuffer(kernelID, "_ParticlesForceBufferWrite", particlesForceBuffer);
+            fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
+
+            // 位置更新
+            kernelID = fluidCS.FindKernel("IntegrateCS");
+            fluidCS.SetBuffer(kernelID, "_ParticlesBufferRead", particlesBufferRead);
+            fluidCS.SetBuffer(kernelID, "_ParticlesForceBufferRead", particlesForceBuffer);
+            fluidCS.SetBuffer(kernelID, "_ParticlesBufferWrite", particlesBufferWrite);
+            fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
+
+            // バッファの入れ替え
+            SwapComputeBuffer(ref particlesBufferRead, ref particlesBufferWrite);
+        }
+
+        /// <summary>
+        /// 近傍探索を用いた流体シミュレーションメインルーチン
+        /// </summary>
+        private void RunFluidSolverWithNeighborhoodSearch()
+        {
+            CreateLookUpTable();
+
+            int kernelID = -1;
+            int threadGroupX = numParticles / THREAD_SIZE_X + 1;
+
+            // 密度の計算
+            kernelID = fluidCS.FindKernel("DensityNeighborCS");
+            fluidCS.SetBuffer(kernelID, "_KeyBuffer", keyBuffer);
+            fluidCS.SetBuffer(kernelID, "_LUTBuffer", LUTBuffer);
+            fluidCS.SetBuffer(kernelID, "_ParticlesBufferRead", particlesBufferRead);
+            fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferWrite", particlesDensityBuffer);
+            fluidCS.SetBuffer(kernelID, "_LoopCounterBuffer", loopCounterBuffer); // Debug
+            fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
+
+            //FluidParticleDensity[] densityResults = new FluidParticleDensity[numParticles];
+            //particlesDensityBuffer.GetData(densityResults);
+            //string filePath = "output_density_neighbor.txt";
+            //StringBuilder sb = new StringBuilder();
+            //sb.Append("result.Density = ");
+            //foreach (FluidParticleDensity result in densityResults)
+            //{
+            //    sb.Append(result.Density.ToString());
+            //    sb.Append(" ");
+            //}
+            //sb.AppendLine();
+            //File.WriteAllText(filePath, sb.ToString());
+            //sb.Clear();
+            //uint[] results = new uint[numParticles];
+            //LUTBuffer.GetData(results);
+            //string filePath = "output_LUT_density_neighbor.txt";
+            //StringBuilder sb = new StringBuilder();
+            //sb.Append("result.Density = ");
+            //foreach (uint result in results)
+            //{
+            //    sb.Append(result.ToString());
+            //    sb.Append(" ");
+            //}
+            //sb.AppendLine();
+            //uint[] results = new uint[numParticles];
+            //loopCounterBuffer.GetData(results);
+            //filePath = "output_density_counter_neighbor.txt";
+            ////StringBuilder sb = new StringBuilder();
+            //sb.Append("loopCounter = ");
+            //foreach (uint result in results)
+            //{
+            //    sb.Append(result.ToString());
+            //    sb.Append(" ");
+            //}
+            //sb.AppendLine();
+            //File.WriteAllText(filePath, sb.ToString());
+
+
+            ////// 圧力の計算
+            ////kernelID = fluidCS.FindKernel("PressureWeakCompressibleCS");
+            ////fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferRead", particlesDensityBuffer);
+            ////fluidCS.SetBuffer(kernelID, "_ParticlesPressureBufferWrite", particlesPressureBuffer);
+            ////fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
+
+            // 圧力の計算
+            kernelID = fluidCS.FindKernel("PressureCompressibleCS");
+            fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferRead", particlesDensityBuffer);
+            fluidCS.SetBuffer(kernelID, "_ParticlesPressureBufferWrite", particlesPressureBuffer);
+            fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
+
+            // 外力の計算
+            kernelID = fluidCS.FindKernel("ForceNeighborCS");
+            fluidCS.SetBuffer(kernelID, "_KeyBuffer", keyBuffer);
+            fluidCS.SetBuffer(kernelID, "_LUTBuffer", LUTBuffer);
             fluidCS.SetBuffer(kernelID, "_ParticlesBufferRead", particlesBufferRead);
             fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferRead", particlesDensityBuffer);
             fluidCS.SetBuffer(kernelID, "_ParticlesPressureBufferRead", particlesPressureBuffer);
@@ -220,7 +485,9 @@ namespace Reference
             particlesPressureBuffer = new ComputeBuffer(numParticles, Marshal.SizeOf(typeof(FluidParticlePressure)));
             particlesDensityBuffer = new ComputeBuffer(numParticles, Marshal.SizeOf(typeof(FluidParticleDensity)));
             particlesForceBuffer = new ComputeBuffer(numParticles, Marshal.SizeOf(typeof(FluidParticleForce)));
-
+            keyBuffer = new ComputeBuffer(numParticles, Marshal.SizeOf(typeof(uint3)));
+            LUTBuffer = new ComputeBuffer(numParticles, Marshal.SizeOf(typeof(uint)));
+            loopCounterBuffer = new ComputeBuffer(numParticles, Marshal.SizeOf(typeof(uint)));
         }
 
         /// <summary>

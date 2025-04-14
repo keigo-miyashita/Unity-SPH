@@ -4,6 +4,12 @@
 #pragma kernel PressureWeakCompressibleCS
 #pragma kernel ForceCS
 #pragma kernel IntegrateCS
+#pragma kernel RegisterHashCS
+#pragma kernel CalculateOffsetsCS
+#pragma kernel DensityNeighborCS
+#pragma kernel ForceNeighborCS
+
+#include "./hash.hlsl"
 
 // 簡略化のためにスレッド数は1次元にしておく．
 #define THREAD_SIZE_X 64
@@ -26,6 +32,12 @@ struct ParticleDensity {
     float density;
 };
 
+struct Entry {
+    uint P_ID;
+    uint hash;
+    uint key;
+};
+
 // 粒子位置と速度を保持するバッファ
 StructuredBuffer    <Particle>          _ParticlesBufferRead;
 RWStructuredBuffer  <Particle>          _ParticlesBufferWrite;
@@ -41,6 +53,15 @@ RWStructuredBuffer  <ParticlePressure>  _ParticlesPressureBufferWrite;
 // 粒子加速度（力）を保持するバッファ
 StructuredBuffer    <ParticleForce>     _ParticlesForceBufferRead;
 RWStructuredBuffer  <ParticleForce>     _ParticlesForceBufferWrite;
+
+// 粒子のキーを保持するバッファ
+RWStructuredBuffer <Entry> _KeyBuffer;
+
+// 各キーの領域を保持するルックアップテーブル
+RWStructuredBuffer <uint> _LUTBuffer;
+
+// Debug用ループカウンタ
+RWStructuredBuffer <uint> _LoopCounterBuffer;
 
 
 
@@ -128,9 +149,11 @@ inline float4 CalculateLapViscosity(
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void DensityCS(uint3 DTid : SV_DispatchThreadID) {
     const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
-    if (P_ID > _NumParticles) {
+    if (P_ID >= _NumParticles) {
         return;
     }
+
+    _LoopCounterBuffer[P_ID] = 0; // Debug
 
     float h_sq = _Smoothlen * _Smoothlen;
     float4 P_position = _ParticlesBufferRead[P_ID].position;
@@ -147,6 +170,7 @@ void DensityCS(uint3 DTid : SV_DispatchThreadID) {
 
         // 影響半径内に収まっている粒子のみ計算．
         if (r_sq < h_sq) {
+            _LoopCounterBuffer[P_ID]++; // Debug
             density += CalculateDensity(r_sq);
         }
     }
@@ -161,7 +185,7 @@ void DensityCS(uint3 DTid : SV_DispatchThreadID) {
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void PressureCompressibleCS(uint3 DTid : SV_DispatchThreadID) {
     const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
-    if (P_ID > _NumParticles) {
+    if (P_ID >= _NumParticles) {
         return;
     }
 
@@ -178,7 +202,7 @@ void PressureCompressibleCS(uint3 DTid : SV_DispatchThreadID) {
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void PressureWeakCompressibleCS(uint3 DTid : SV_DispatchThreadID) {
     const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
-    if (P_ID > _NumParticles) {
+    if (P_ID >= _NumParticles) {
         return;
     }
 
@@ -196,7 +220,7 @@ void PressureWeakCompressibleCS(uint3 DTid : SV_DispatchThreadID) {
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void ForceCS(uint3 DTid : SV_DispatchThreadID) {
     const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
-    if (P_ID > _NumParticles) {
+    if (P_ID >= _NumParticles) {
         return;
     }
 
@@ -246,7 +270,7 @@ void ForceCS(uint3 DTid : SV_DispatchThreadID) {
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void IntegrateCS(uint3 DTid : SV_DispatchThreadID) {
     const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
-    if (P_ID > _NumParticles) {
+    if (P_ID >= _NumParticles) {
         return;
     }
 
@@ -292,4 +316,159 @@ void IntegrateCS(uint3 DTid : SV_DispatchThreadID) {
     // パーティクルのバッファ更新
     _ParticlesBufferWrite[P_ID].position = position;
     _ParticlesBufferWrite[P_ID].velocity = velocity;
+}
+
+// ハッシュ値をバッファに記録
+[numthreads(THREAD_SIZE_X, 1, 1)]
+void RegisterHashCS(uint3 DTid : SV_DispatchThreadID)
+{
+    const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
+    if (P_ID >= _NumParticles) {
+        return;
+    }
+    
+    _LUTBuffer[P_ID] = _NumParticles;
+    int3 cell = GetCell(_ParticlesBufferRead[P_ID].position, _Smoothlen);
+    uint hash = GetHash(cell);
+    uint key = GetKey(hash, _NumParticles);
+
+    _KeyBuffer[P_ID].P_ID = P_ID;
+    _KeyBuffer[P_ID].hash = hash;
+    _KeyBuffer[P_ID].key = key;
+}
+
+// ルックアップテーブルを作成
+[numthreads(THREAD_SIZE_X, 1, 1)]
+void CalculateOffsetsCS(uint DTid : SV_DispatchThreadID)
+{
+    const uint i = DTid.x;                 // 現在処理しているパーティクルID
+    if (i >= _NumParticles) {
+        return;
+    }
+
+    uint key = _KeyBuffer[i].key;
+    uint keyPrev = i == 0 ? _NumParticles : _KeyBuffer[i - 1].key;
+    
+    if (key != keyPrev) {
+        _LUTBuffer[key] = i;
+    }
+}
+
+//-------------------------------------------------------
+//密度の算出
+//-------------------------------------------------------
+[numthreads(THREAD_SIZE_X, 1, 1)]
+void DensityNeighborCS(uint3 DTid : SV_DispatchThreadID) {
+    const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
+    if (P_ID >= _NumParticles) {
+        return;
+    }
+
+    _LoopCounterBuffer[P_ID] = 0; // Debug
+
+    float h_sq = _Smoothlen * _Smoothlen;
+    float4 P_position = _ParticlesBufferRead[P_ID].position;
+
+    int3 cell = GetCell(P_position, _Smoothlen);
+    uint hash = GetHash(cell);
+    uint key = GetKey(hash, _NumParticles);
+
+    // 近傍探索 (O(n))
+    float density = 0.0f;
+    for (uint i = 0; i < 27; i++) {
+        int3 offset = offsets3D[i];
+        int3 neighborCell = cell + offset;
+        int neighborHash = GetHash(neighborCell);
+        int neighborKey = GetKey(neighborHash, _NumParticles);
+        uint currentIndex = _LUTBuffer[neighborKey];
+
+        while (currentIndex < _NumParticles) {
+            Entry neighborEntry = _KeyBuffer[currentIndex];
+            currentIndex++;
+            if (neighborEntry.key != neighborKey) break;
+            if (neighborEntry.hash != neighborHash) continue;
+            
+            uint N_ID = neighborEntry.P_ID;
+            float4 N_position = _ParticlesBufferRead[N_ID].position;
+
+            // if (P_ID != N_ID) continue;
+
+            float4 diff = N_position - P_position;  // 自分から相手へ向かうベクトル
+            float r_sq = dot(diff, diff);           // 粒子間距離の2乗
+
+            // 影響半径内に収まっている粒子のみ計算．
+            if (r_sq < h_sq) {
+                _LoopCounterBuffer[P_ID]++; // Debug
+                density += CalculateDensity(r_sq);
+            }
+        }
+    }
+
+    // 密度バッファを更新
+    _ParticlesDensityBufferWrite[P_ID].density = density;
+}
+
+//------------------------------------------------------------
+// 力（加速度）の算出
+// -----------------------------------------------------------
+[numthreads(THREAD_SIZE_X, 1, 1)]
+void ForceNeighborCS(uint3 DTid : SV_DispatchThreadID) {
+    const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
+    if (P_ID >= _NumParticles) {
+        return;
+    }
+
+    const float4 P_position = _ParticlesBufferRead[P_ID].position;
+    const float4 P_velocity = _ParticlesBufferRead[P_ID].velocity;
+    const float  P_density = _ParticlesDensityBufferRead[P_ID].density;
+    const float  P_pressure = _ParticlesPressureBufferRead[P_ID].pressure;
+
+    const float h_sq = _Smoothlen * _Smoothlen;
+
+    int3 cell = GetCell(P_position, _Smoothlen);
+    uint hash = GetHash(cell);
+    uint key = GetKey(hash, _NumParticles);
+
+    // 近傍探索 (O(n))
+    float4 press = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    float4 visco = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    for (uint i = 0; i < 27; i++) {
+        int3 offset = offsets3D[i];
+        int3 neighborCell = cell + offset;
+        int neighborHash = GetHash(neighborCell);
+        int neighborKey = GetKey(neighborHash, _NumParticles);
+        uint currentIndex = _LUTBuffer[neighborKey];
+
+        while (currentIndex < _NumParticles) {
+            Entry neighborEntry = _KeyBuffer[currentIndex];
+            currentIndex++;
+            if (neighborEntry.key != neighborKey) break;
+            if (neighborEntry.hash != neighborHash) continue;
+            
+            uint N_ID = neighborEntry.P_ID;
+            float4 N_position = _ParticlesBufferRead[N_ID].position;
+
+            float4 diff = N_position - P_position;
+            float r_sq = dot(diff, diff);
+
+            if (r_sq < h_sq) {
+                float N_density = _ParticlesDensityBufferRead[N_ID].density;
+                float N_pressure = _ParticlesPressureBufferRead[N_ID].pressure;
+                float4 N_velocity = _ParticlesBufferRead[N_ID].velocity;
+                float r = sqrt(r_sq);
+
+                // 圧力項
+                press += CalculateGradPressure(r, P_pressure, N_pressure, N_density, -diff);
+
+                // 粘性項
+                visco += CalculateLapViscosity(r, P_velocity, N_velocity, N_density);
+            }
+        }
+    }
+
+    // 統合
+    float4 force = press + _Viscosity * visco;
+
+    // 加速度バッファの更新
+    _ParticlesForceBufferWrite[P_ID].acceleration = force / P_density;
 }

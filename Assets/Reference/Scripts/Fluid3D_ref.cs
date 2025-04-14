@@ -97,7 +97,7 @@ namespace Reference
                             Vector3 jitter = UnityEngine.Random.insideUnitSphere * jitterStrength;
                             particles[i].Position = new Vector3(px, py, pz) + jitter;
                             particles[i].Velocity = initVelocity;
-                            Debug.Log("i = " + i);
+                            //Debug.Log("i = " + i);
                             i++;
                         }
                     }
