@@ -48,10 +48,10 @@ namespace Reference
 
     public abstract class FluidBase_ref<T> : MonoBehaviour where T : struct
     {
-        [SerializeField] private int particleNum = 1024;   // パーティクルの個数．
+        [SerializeField] protected int particleNum = 1024;   // パーティクルの個数．
         [SerializeField] protected float smoothlen = 0.15f;                               // 粒子半径． 
         [SerializeField] protected float gasConstant = 10.0f;                               // ガス定数．
-        [SerializeField] private float pressureStiffness = 200.0f;                          // 圧力項係数．
+        [SerializeField] protected float pressureStiffness = 200.0f;                          // 圧力項係数．
         [SerializeField] protected float restDensity = 1000.0f;                             // 静止密度．
         [SerializeField] protected float particleMass = 0.02f;                           // 粒子質量．
         [SerializeField] protected float viscosity = 1.04f;
@@ -59,31 +59,31 @@ namespace Reference
         [SerializeField] protected float wallStiffness = 3000.0f;
         [SerializeField] protected int iterations = 5;
         [SerializeField] protected Vector3 gravity = new Vector3(0f, -9.8f, 0f);
-        [SerializeField] protected Vector3 range = new Vector3(6f, 6f, 6f);
-        [SerializeField] bool drawSimulationGrid = true;
+        [SerializeField] public Vector3 range = new Vector3(6f, 6f, 6f);
+        [SerializeField] protected bool drawSimulationGrid = true;
 
-        private int numParticles;                                                           // パーティクルの個数．
-        private float timeStep;                                                             // 時間刻み幅．
-        private float densityCoef;                                                          // Poly6 カーネルの密度係数．            
-        private float gradPressureCoef;                                                     // Spiky カーネルの密度係数．
-        private float lapViscosityCoef;                                                     // Laplacian カーネルの密度係数．
+        protected int numParticles;                                                           // パーティクルの個数．
+        protected float timeStep;                                                             // 時間刻み幅．
+        protected float densityCoef;                                                          // Poly6 カーネルの密度係数．            
+        protected float gradPressureCoef;                                                     // Spiky カーネルの密度係数．
+        protected float lapViscosityCoef;                                                     // Laplacian カーネルの密度係数．
 
         #region Debug
-        private uint frame = 0;
+        protected uint frame = 0;
 
         #endregion
 
         #region DirectConpute
-        private ComputeShader fluidCS;
-        private static readonly int THREAD_SIZE_X = 64;
-        private ComputeBuffer particlesBufferRead;
-        private ComputeBuffer particlesBufferWrite;
-        private ComputeBuffer particlesPressureBuffer;
-        private ComputeBuffer particlesDensityBuffer;
-        private ComputeBuffer particlesForceBuffer;
-        private ComputeBuffer keyBuffer;
-        private ComputeBuffer LUTBuffer;
-        private ComputeBuffer loopCounterBuffer; // Debug
+        protected ComputeShader fluidCS;
+        protected static readonly int THREAD_SIZE_X = 64;
+        protected ComputeBuffer particlesBufferRead;
+        protected ComputeBuffer particlesBufferWrite;
+        protected ComputeBuffer particlesPressureBuffer;
+        protected ComputeBuffer particlesDensityBuffer;
+        protected ComputeBuffer particlesForceBuffer;
+        protected ComputeBuffer keyBuffer;
+        protected ComputeBuffer LUTBuffer;
+        protected ComputeBuffer loopCounterBuffer; // Debug
 
         #endregion
 
@@ -115,7 +115,7 @@ namespace Reference
             InitBuffers();
         }
 
-        private void Update()
+        protected virtual void Update()
         {
             timeStep = Mathf.Min(maxAllowableTimestep, Time.deltaTime);
 
@@ -156,7 +156,12 @@ namespace Reference
                 //RunFluidSolver();
                 RunFluidSolverWithNeighborhoodSearch();
             }
+            UpdateDensityMap(fluidCS);
             //RunFluidSolverWithNeighborhoodSearch();
+            if (frame == 0)
+            {
+                //UpdateDensityMap(fluidCS);
+            }
             frame++;
         }
 
@@ -176,7 +181,7 @@ namespace Reference
         /// <summary>
         /// 粒子へのアクセスを高速化するためのルックアップテーブルを用意
         /// </summary>
-        private void CreateLookUpTable()
+        protected void CreateLookUpTable()
         {
             int kernelID = -1;
             int threadGroupX = numParticles / THREAD_SIZE_X + 1;
@@ -487,7 +492,8 @@ namespace Reference
             particlesForceBuffer = new ComputeBuffer(numParticles, Marshal.SizeOf(typeof(FluidParticleForce)));
             keyBuffer = new ComputeBuffer(numParticles, Marshal.SizeOf(typeof(uint3)));
             LUTBuffer = new ComputeBuffer(numParticles, Marshal.SizeOf(typeof(uint)));
-            loopCounterBuffer = new ComputeBuffer(numParticles, Marshal.SizeOf(typeof(uint)));
+
+            loopCounterBuffer = new ComputeBuffer(numParticles, Marshal.SizeOf(typeof(uint))); // Debug
         }
 
         /// <summary>
@@ -499,6 +505,12 @@ namespace Reference
             ping = pong;
             pong = temp;
         }
+
+        /// <summary>
+        /// 密度場計算用のメソッド
+        /// </summary>
+        /// <param name="shader"></param>
+        protected virtual void UpdateDensityMap(ComputeShader shader) { }
 
         /// <summary>
         /// バッファの開放

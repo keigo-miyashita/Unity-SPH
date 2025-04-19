@@ -1,4 +1,6 @@
-﻿// Each #kernel tells which function to compile; you can have many kernels
+﻿#pragma enable_d3d11_debug_symbols
+
+// Each #kernel tells which function to compile; you can have many kernels
 #pragma kernel DensityCS
 #pragma kernel PressureCompressibleCS
 #pragma kernel PressureWeakCompressibleCS
@@ -8,6 +10,7 @@
 #pragma kernel CalculateOffsetsCS
 #pragma kernel DensityNeighborCS
 #pragma kernel ForceNeighborCS
+#pragma kernel DensityMapCS
 
 #include "./hash.hlsl"
 
@@ -60,6 +63,9 @@ RWStructuredBuffer <Entry> _KeyBuffer;
 // 各キーの領域を保持するルックアップテーブル
 RWStructuredBuffer <uint> _LUTBuffer;
 
+// 密度場を格納する3Dテクスチャ
+RWTexture3D<float> _DensityMapTexure;
+
 // Debug用ループカウンタ
 RWStructuredBuffer <uint> _LoopCounterBuffer;
 
@@ -85,6 +91,8 @@ cbuffer CB {
     float3 _MousePos;           // マウス位置
     float  _MouseRadius;        // マウスインタラクションの半径
     bool   _MouseDown;          // マウスが押されているか
+
+    uint3 _DensityMapSize;      // 各軸方向の格子点数
 };
 
 /// Poly6 カーネルの実装
@@ -153,7 +161,7 @@ void DensityCS(uint3 DTid : SV_DispatchThreadID) {
         return;
     }
 
-    _LoopCounterBuffer[P_ID] = 0; // Debug
+    // _LoopCounterBuffer[P_ID] = 0; // Debug
 
     float h_sq = _Smoothlen * _Smoothlen;
     float4 P_position = _ParticlesBufferRead[P_ID].position;
@@ -170,7 +178,7 @@ void DensityCS(uint3 DTid : SV_DispatchThreadID) {
 
         // 影響半径内に収まっている粒子のみ計算．
         if (r_sq < h_sq) {
-            _LoopCounterBuffer[P_ID]++; // Debug
+            // _LoopCounterBuffer[P_ID]++; // Debug
             density += CalculateDensity(r_sq);
         }
     }
@@ -398,7 +406,7 @@ void DensityNeighborCS(uint3 DTid : SV_DispatchThreadID) {
 
             // 影響半径内に収まっている粒子のみ計算．
             if (r_sq < h_sq) {
-                _LoopCounterBuffer[P_ID]++; // Debug
+                // _LoopCounterBuffer[P_ID]++; // Debug
                 density += CalculateDensity(r_sq);
             }
         }
@@ -471,4 +479,55 @@ void ForceNeighborCS(uint3 DTid : SV_DispatchThreadID) {
 
     // 加速度バッファの更新
     _ParticlesForceBufferWrite[P_ID].acceleration = force / P_density;
+}
+
+float DensityAtGridPoint(float3 pos)
+{
+    float h_sq = _Smoothlen * _Smoothlen;
+
+    int3 cell = GetCell(pos, _Smoothlen);
+    uint hash = GetHash(cell);
+    uint key = GetKey(hash, _NumParticles);
+
+    // 近傍探索 (O(n))
+    float density = 0.0f;
+    for (uint i = 0; i < 27; i++) {
+        int3 offset = offsets3D[i];
+        int3 neighborCell = cell + offset;
+        int neighborHash = GetHash(neighborCell);
+        int neighborKey = GetKey(neighborHash, _NumParticles);
+        uint currentIndex = _LUTBuffer[neighborKey];
+
+        while (currentIndex < _NumParticles) {
+            Entry neighborEntry = _KeyBuffer[currentIndex];
+            currentIndex++;
+            if (neighborEntry.key != neighborKey) break;
+            if (neighborEntry.hash != neighborHash) continue;
+
+            // _LoopCounterBuffer[key]++;
+            
+            uint N_ID = neighborEntry.P_ID;
+            float4 N_position = _ParticlesBufferRead[N_ID].position;
+
+            float4 diff = N_position - float4(pos, 0.0);  // 自分から相手へ向かうベクトル
+            float r_sq = dot(diff, diff);           // 粒子間距離の2乗
+            // 影響半径内に収まっている粒子のみ計算．
+            if (r_sq < h_sq) {
+                density += CalculateDensity(r_sq);
+            }
+        }
+    }
+
+    return density;
+}
+
+[numthreads(8, 8, 8)]
+void DensityMapCS(uint3 DTid : SV_DispatchThreadID)
+{
+    if (DTid.x >= _DensityMapSize.x || DTid.y >= _DensityMapSize.y || DTid.z >= _DensityMapSize.z) {
+        return;
+    }
+    float3 texturePos = DTid / (_DensityMapSize - 1.0);
+    float3 gridPointPos = (texturePos) * (_Range);
+    _DensityMapTexure[DTid] = DensityAtGridPoint(gridPointPos);
 }
