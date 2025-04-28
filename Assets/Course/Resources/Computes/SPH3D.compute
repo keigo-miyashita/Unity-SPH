@@ -88,21 +88,23 @@ cbuffer CB {
     bool   _MouseDown;          // マウスが押されているか
 };
 
-/// Poly6 カーネルの実装
+/// NOTE : Poly6 カーネルの実装
 /// 参考：[Muller et al. 2003] Muller et al.: Particle based fluid simulation for interactive applications, SCA, July 2003
 /// https://dl.acm.org/doi/10.5555/846276.846298
 inline float CalculateDensity(
     float r_sq // 粒子間距離の2乗．
 ) {
     const float h_sq = _Smoothlen * _Smoothlen;
-    return _DensityCoef * (h_sq - r_sq) * (h_sq - r_sq) * (h_sq - r_sq);
+    // return /*密度を計算*/;
+    return 0.0f; // エラー回避用．実装時に削除．
 }
 
-/// 圧力方程式の実装．（非圧縮性を考慮しない）
+/// NOTE : 圧力方程式の実装．（非圧縮性を考慮しない）
 inline float CalculateCompressiblePressure(
     float density // 密度
 ) {
-    return _GasConstant * (density - _RestDensity);
+    // return /*圧力を計算*/;
+    return 0.0f; // エラー回避用．実装時に削除
 }
 
 /// 微圧縮性の実装．（SPH は体積保存性が担保されない．これを改善するための手法）
@@ -115,7 +117,7 @@ inline float CalculatePressure(
     return _PressureStiffness * max(pow(density / _RestDensity, 7) - 1.0f, 0.0f);
 }
 
-/// Spiky カーネルの実装
+/// NOTE :Spiky カーネルの実装
 /// 参考：[Muller et al. 2003]
 inline float4 CalculateGradPressure(
     float r,            // 粒子間距離
@@ -125,8 +127,9 @@ inline float4 CalculateGradPressure(
     float4 diff         // 自分から相手へ向かうベクトル
 ) {
     const float h = _Smoothlen;
-    float avg_pressure = 0.5f * (P_pressure + N_pressure);
-    return _GradPressureCoef * avg_pressure / (N_density + 0.001f) * (h - r) * (h - r) / (r + 0.001f) * diff;
+    // float avg_pressure = /*平均圧力を計算*/;
+    // return /*Spiky カーネルを適用*/;
+    return 0.0f; // エラー回避用．実装時に削除
 }
 
 /// Viscosity カーネルの実装
@@ -138,8 +141,9 @@ inline float4 CalculateLapViscosity(
     float N_density     // 相手の粒子が保持している密度
 ) {
     const float h = _Smoothlen;
-    float4 vel_diff = (N_velocity - P_velocity);
-    return _LapViscosityCoef / N_density * (h - r) * vel_diff;
+    // float4 vel_diff = /*速度の差を計算*/;
+    // return /*Viscosity カーネルを適用*/;
+    return 0.0f; // エラー回避用．実装時に削除
 }
 
 
@@ -158,19 +162,7 @@ void DensityCS(uint3 DTid : SV_DispatchThreadID) {
 
     // 近傍探索 (O(n))
     float density = 0.0f;
-    for (uint N_ID = 0; N_ID < _NumParticles; N_ID++) {
-        // if (N_ID == P_ID) continue;     // 自身を計算対象とした場合スキップ
-
-        float4 N_position = _ParticlesBufferRead[N_ID].position;
-
-        float4 diff = N_position - P_position;  // 自分から相手へ向かうベクトル
-        float r_sq = dot(diff, diff);           // 粒子間距離の2乗
-
-        // 影響半径内に収まっている粒子のみ計算．
-        if (r_sq < h_sq) {
-            density += CalculateDensity(r_sq);
-        }
-    }
+    /*全粒子を探索し，サポート半径内の粒子を参照して密度を計算*/
 
     // 密度バッファを更新
     _ParticlesDensityBufferWrite[P_ID].density = density;
@@ -186,8 +178,7 @@ void PressureCompressibleCS(uint3 DTid : SV_DispatchThreadID) {
         return;
     }
 
-    float P_density = _ParticlesDensityBufferRead[P_ID].density;
-    float P_pressure = CalculateCompressiblePressure(P_density);
+    /*各粒子の密度を参照して圧力を計算*/
 
     // 圧力バッファを更新．
     _ParticlesPressureBufferWrite[P_ID].pressure = P_pressure;
@@ -231,27 +222,7 @@ void ForceCS(uint3 DTid : SV_DispatchThreadID) {
     // 近傍探索 (O(n))
     float4 press = float4(0.0f, 0.0f, 0.0f, 0.0f);
     float4 visco = float4(0.0f, 0.0f, 0.0f, 0.0f);
-    for (uint N_ID = 0; N_ID < _NumParticles; N_ID++) {
-        // if (N_ID == P_ID) continue;     // 自身を計算対象とした場合スキップ
-
-        float4 N_position = _ParticlesBufferRead[N_ID].position;
-
-        float4 diff = N_position - P_position;
-        float r_sq = dot(diff, diff);
-
-        if (r_sq < h_sq) {
-            float N_density = _ParticlesDensityBufferRead[N_ID].density;
-            float N_pressure = _ParticlesPressureBufferRead[N_ID].pressure;
-            float4 N_velocity = _ParticlesBufferRead[N_ID].velocity;
-            float r = sqrt(r_sq);
-
-            // 圧力項
-            press += CalculateGradPressure(r, P_pressure, N_pressure, N_density, -diff);
-
-            // 粘性項
-            visco += CalculateLapViscosity(r, P_velocity, N_velocity, N_density);
-        }
-    }
+    /*全粒子を探索し，サポート半径内の粒子を参照して圧力項，粘性項を計算*/
 
     // 統合
     float4 force = press + _Viscosity * visco;
@@ -326,14 +297,15 @@ void RegisterHashCS(uint3 DTid : SV_DispatchThreadID)
         return;
     }
     
-    _LUTBuffer[P_ID] = _NumParticles;
-    int3 cell = GetCell(_ParticlesBufferRead[P_ID].position.xyz, _Smoothlen);
-    uint hash = GetHash(cell);
-    uint key = GetKey(hash, _NumParticles);
+    _LUTBuffer[P_ID] = _NumParticles; // 初期化処理．
 
-    _KeyBuffer[P_ID].P_ID = P_ID;
-    _KeyBuffer[P_ID].hash = hash;
-    _KeyBuffer[P_ID].key = key;
+    // int3 cell = /*粒子が所属するセルを取得*/;
+    // uint hash = /*ハッシュに変換*/;
+    // uint key = /*キーを取得*/;
+
+    // _KeyBuffer[P_ID].P_ID = P_ID;
+    // _KeyBuffer[P_ID].hash = hash;
+    // _KeyBuffer[P_ID].key = key;
 }
 
 //------------------------------------------------------------
@@ -347,12 +319,7 @@ void CalculateOffsetsCS(uint DTid : SV_DispatchThreadID)
         return;
     }
 
-    uint key = _KeyBuffer[i].key;
-    uint keyPrev = (i == 0) ? _NumParticles : _KeyBuffer[i - 1].key;
-    
-    if (key != keyPrev) {
-        _LUTBuffer[key] = i;
-    }
+    /*ルックアップテーブルへの登録処理*/
 }
 
 //-------------------------------------------------------
@@ -372,35 +339,9 @@ void DensityNeighborCS(uint3 DTid : SV_DispatchThreadID) {
     uint hash = GetHash(cell);
     uint key = GetKey(hash, _NumParticles);
 
-    // 近傍探索 (O(n))
+    // 近傍探索 (O(1))
     float density = 0.0f;
-    for (uint i = 0; i < 27; i++) {
-        int3 offset = offsets3D[i];
-        int3 neighborCell = cell + offset;
-        uint neighborHash = GetHash(neighborCell);
-        uint neighborKey = GetKey(neighborHash, _NumParticles);
-        uint currentIndex = _LUTBuffer[neighborKey];
-
-        while (currentIndex < _NumParticles) {
-            Entry neighborEntry = _KeyBuffer[currentIndex];
-            currentIndex++;
-            if (neighborEntry.key != neighborKey) break;
-            if (neighborEntry.hash != neighborHash) continue;
-            
-            uint N_ID = neighborEntry.P_ID;
-            float4 N_position = _ParticlesBufferRead[N_ID].position;
-
-            // if (P_ID != N_ID) continue;
-
-            float4 diff = N_position - P_position;  // 自分から相手へ向かうベクトル
-            float r_sq = dot(diff, diff);           // 粒子間距離の2乗
-
-            // 影響半径内に収まっている粒子のみ計算．
-            if (r_sq < h_sq) {
-                density += CalculateDensity(r_sq);
-            }
-        }
-    }
+    /*ルックアップテーブルを参照して近傍探索*/
 
     // 密度バッファを更新
     _ParticlesDensityBufferWrite[P_ID].density = density;
@@ -427,42 +368,10 @@ void ForceNeighborCS(uint3 DTid : SV_DispatchThreadID) {
     uint hash = GetHash(cell);
     uint key = GetKey(hash, _NumParticles);
 
-    // 近傍探索 (O(n))
+    // 近傍探索 (O(1))
     float4 press = float4(0.0f, 0.0f, 0.0f, 0.0f);
     float4 visco = float4(0.0f, 0.0f, 0.0f, 0.0f);
-    for (uint i = 0; i < 27; i++) {
-        int3 offset = offsets3D[i];
-        int3 neighborCell = cell + offset;
-        uint neighborHash = GetHash(neighborCell);
-        uint neighborKey = GetKey(neighborHash, _NumParticles);
-        uint currentIndex = _LUTBuffer[neighborKey];
-
-        while (currentIndex < _NumParticles) {
-            Entry neighborEntry = _KeyBuffer[currentIndex];
-            currentIndex++;
-            if (neighborEntry.key != neighborKey) break;
-            if (neighborEntry.hash != neighborHash) continue;
-            
-            uint N_ID = neighborEntry.P_ID;
-            float4 N_position = _ParticlesBufferRead[N_ID].position;
-
-            float4 diff = N_position - P_position;
-            float r_sq = dot(diff, diff);
-
-            if (r_sq < h_sq) {
-                float N_density = _ParticlesDensityBufferRead[N_ID].density;
-                float N_pressure = _ParticlesPressureBufferRead[N_ID].pressure;
-                float4 N_velocity = _ParticlesBufferRead[N_ID].velocity;
-                float r = sqrt(r_sq);
-
-                // 圧力項
-                press += CalculateGradPressure(r, P_pressure, N_pressure, N_density, -diff);
-
-                // 粘性項
-                visco += CalculateLapViscosity(r, P_velocity, N_velocity, N_density);
-            }
-        }
-    }
+    /*ルックアップテーブルを参照して近傍探索*/
 
     // 統合
     float4 force = press + _Viscosity * visco;
@@ -480,7 +389,7 @@ float DensityAtGridPoint(float3 pos)
     uint hash = GetHash(cell);
     uint key = GetKey(hash, _NumParticles);
 
-    // 近傍探索 (O(n))
+    // 近傍探索 (O(1))
     float density = 0.0f;
     for (uint i = 0; i < 27; i++) {
         int3 offset = offsets3D[i];
@@ -519,6 +428,7 @@ void DensityMapCS(uint3 DTid : SV_DispatchThreadID)
     if (DTid.x >= _DensityMapSize.x || DTid.y >= _DensityMapSize.y || DTid.z >= _DensityMapSize.z) {
         return;
     }
+
     float3 texturePos = DTid / (_DensityMapSize - 1.0);
     float3 gridPointPos = (texturePos) * (_Range);
     _DensityMapTexure[DTid] = DensityAtGridPoint(gridPointPos);

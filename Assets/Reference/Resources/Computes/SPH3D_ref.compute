@@ -159,8 +159,6 @@ void DensityCS(uint3 DTid : SV_DispatchThreadID) {
     // 近傍探索 (O(n))
     float density = 0.0f;
     for (uint N_ID = 0; N_ID < _NumParticles; N_ID++) {
-        // if (N_ID == P_ID) continue;     // 自身を計算対象とした場合スキップ
-
         float4 N_position = _ParticlesBufferRead[N_ID].position;
 
         float4 diff = N_position - P_position;  // 自分から相手へ向かうベクトル
@@ -232,8 +230,6 @@ void ForceCS(uint3 DTid : SV_DispatchThreadID) {
     float4 press = float4(0.0f, 0.0f, 0.0f, 0.0f);
     float4 visco = float4(0.0f, 0.0f, 0.0f, 0.0f);
     for (uint N_ID = 0; N_ID < _NumParticles; N_ID++) {
-        // if (N_ID == P_ID) continue;     // 自身を計算対象とした場合スキップ
-
         float4 N_position = _ParticlesBufferRead[N_ID].position;
 
         float4 diff = N_position - P_position;
@@ -372,7 +368,7 @@ void DensityNeighborCS(uint3 DTid : SV_DispatchThreadID) {
     uint hash = GetHash(cell);
     uint key = GetKey(hash, _NumParticles);
 
-    // 近傍探索 (O(n))
+    // 近傍探索 (O(1))
     float density = 0.0f;
     for (uint i = 0; i < 27; i++) {
         int3 offset = offsets3D[i];
@@ -389,8 +385,6 @@ void DensityNeighborCS(uint3 DTid : SV_DispatchThreadID) {
             
             uint N_ID = neighborEntry.P_ID;
             float4 N_position = _ParticlesBufferRead[N_ID].position;
-
-            // if (P_ID != N_ID) continue;
 
             float4 diff = N_position - P_position;  // 自分から相手へ向かうベクトル
             float r_sq = dot(diff, diff);           // 粒子間距離の2乗
@@ -427,7 +421,7 @@ void ForceNeighborCS(uint3 DTid : SV_DispatchThreadID) {
     uint hash = GetHash(cell);
     uint key = GetKey(hash, _NumParticles);
 
-    // 近傍探索 (O(n))
+    // 近傍探索 (O(1))
     float4 press = float4(0.0f, 0.0f, 0.0f, 0.0f);
     float4 visco = float4(0.0f, 0.0f, 0.0f, 0.0f);
     for (uint i = 0; i < 27; i++) {
@@ -480,7 +474,7 @@ float DensityAtGridPoint(float3 pos)
     uint hash = GetHash(cell);
     uint key = GetKey(hash, _NumParticles);
 
-    // 近傍探索 (O(n))
+    // 近傍探索 (O(1))
     float density = 0.0f;
     for (uint i = 0; i < 27; i++) {
         int3 offset = offsets3D[i];

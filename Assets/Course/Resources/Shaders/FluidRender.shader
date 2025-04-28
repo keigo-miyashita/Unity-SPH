@@ -49,11 +49,8 @@ Shader "Unlit/FluidRender"
             fixed4 frag (v2f i) : SV_Target
             {
                 float3 lightDir = _WorldSpaceLightPos0;
-                //return fixed4(1.0f, 0.0f, 0.0f, 1.0f);
-                // return col;
-                // return float4(lightDir, 1.0f);
+                // 簡単なランバート反射によるシェーディング
                 return col * max(0.0, dot(lightDir, normalize(i.normal)));
-                // return col * dot(lightDir, normalize(i.normal)) * 0.5 + 0.5;
             }
             ENDCG
         }

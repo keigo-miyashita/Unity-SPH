@@ -118,12 +118,12 @@ namespace Course
         {
             timeStep = Mathf.Min(maxAllowableTimestep, Time.deltaTime);
 
-            // カーネル関数における係数の計算（3D）．
+            // NOTE : カーネル関数における係数の計算（3D）を実装．
             // 参考：Muller et al. Particle-based fluid simulation for interactive applications, SCA, July 2003
             // https://dl.acm.org/doi/10.5555/846276.846298
-            densityCoef = particleMass * 315f / (64f * Mathf.PI * Mathf.Pow(smoothlen, 9));
-            gradPressureCoef = particleMass * -45f / (Mathf.PI * Mathf.Pow(smoothlen, 6));
-            lapViscosityCoef = particleMass * 45f / (Mathf.PI * Mathf.Pow(smoothlen, 6));
+            // densityCoef = /*Poly6 カーネルの係数*/;
+            // gradPressureCoef = /*Spiky カーネルの係数*/;
+            // lapViscosityCoef = /*Viscosity カーネルの係数*/;
 
             // シェーダ定数の転送．
             fluidCS.SetInt("_NumParticles", numParticles);
@@ -181,61 +181,9 @@ namespace Course
 
             Entry[] results = new Entry[numParticles];
             keyBuffer.GetData(results);
-            //for (int i = 0; i < numParticles; i++)
-            //{
-            //    Debug.Log("result[" + i + "] = " + results[i].key);
-            //}
-            //string filePath = "output_before_after.txt";
-            //StringBuilder sb = new StringBuilder();
-            //sb.Append("entry.P_ID = ");
-            //foreach (Entry entry in results)
-            //{
-            //    sb.Append(entry.P_ID.ToString().PadLeft(6));
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //sb.Append("entry.hash = ");
-            //foreach (Entry entry in results)
-            //{
-            //    sb.Append(entry.hash.ToString().PadLeft(6));
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //sb.Append("entry.key  = ");
-            //foreach (Entry entry in results)
-            //{
-            //    sb.Append(entry.key.ToString().PadLeft(6));
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
+            // NOTE :  ルックアップテーブルをソート
             Array.Sort(results, (a, b) => a.key.CompareTo(b.key));
-            //for (int i = 0; i < numParticles; i++)
-            //{
-            //    Debug.Log("result[" + i + "] = " + results[i].key + ", " + results[i].hash + ", " + results[i].P_ID);
-            //}
             keyBuffer.SetData(results);
-            //sb.Append("entry.P_ID = ");
-            //foreach (Entry entry in results)
-            //{
-            //    sb.Append(entry.P_ID.ToString().PadLeft(6));
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //sb.Append("entry.hash = ");
-            //foreach (Entry entry in results)
-            //{
-            //    sb.Append(entry.hash.ToString().PadLeft(6));
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //sb.Append("entry.key  = ");
-            //foreach (Entry entry in results)
-            //{
-            //    sb.Append(entry.key.ToString().PadLeft(6));
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //File.WriteAllText(filePath, sb.ToString());
 
             kernelID = fluidCS.FindKernel("CalculateOffsetsCS");
             fluidCS.SetBuffer(kernelID, "_KeyBuffer", keyBuffer);
@@ -243,43 +191,6 @@ namespace Course
             fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
             uint[] offsets = new uint[numParticles];
             LUTBuffer.GetData(offsets);
-
-            //string filePath = "output.txt";
-            //StringBuilder sb = new StringBuilder();
-            //sb.Append("entry.P_ID = ");
-            //foreach (Entry entry in results)
-            //{
-            //    sb.Append(entry.P_ID.ToString());
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //sb.Append("entry.hash = ");
-            //foreach (Entry entry in results)
-            //{
-            //    sb.Append(entry.hash.ToString());
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //sb.Append("entry.key  = ");
-            //foreach (Entry entry in results)
-            //{
-            //    sb.Append(entry.key.ToString());
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //sb.Append("offset     = ");
-            //foreach (uint offset in offsets)
-            //{
-            //    sb.Append(offset.ToString().PadLeft(6));
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-
-            //File.WriteAllText(filePath, sb.ToString());
-            //for (int i = 0; i < numParticles; i++)
-            //{
-            //    Debug.Log("outsets[" + i + "] = " + offsets[i]);
-            //}
         }
 
         /// <summary>

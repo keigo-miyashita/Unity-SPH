@@ -181,61 +181,8 @@ namespace Reference
 
             Entry[] results = new Entry[numParticles];
             keyBuffer.GetData(results);
-            //for (int i = 0; i < numParticles; i++)
-            //{
-            //    Debug.Log("result[" + i + "] = " + results[i].key);
-            //}
-            //string filePath = "output_before_after.txt";
-            //StringBuilder sb = new StringBuilder();
-            //sb.Append("entry.P_ID = ");
-            //foreach (Entry entry in results)
-            //{
-            //    sb.Append(entry.P_ID.ToString().PadLeft(6));
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //sb.Append("entry.hash = ");
-            //foreach (Entry entry in results)
-            //{
-            //    sb.Append(entry.hash.ToString().PadLeft(6));
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //sb.Append("entry.key  = ");
-            //foreach (Entry entry in results)
-            //{
-            //    sb.Append(entry.key.ToString().PadLeft(6));
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
             Array.Sort(results, (a, b) => a.key.CompareTo(b.key));
-            //for (int i = 0; i < numParticles; i++)
-            //{
-            //    Debug.Log("result[" + i + "] = " + results[i].key + ", " + results[i].hash + ", " + results[i].P_ID);
-            //}
             keyBuffer.SetData(results);
-            //sb.Append("entry.P_ID = ");
-            //foreach (Entry entry in results)
-            //{
-            //    sb.Append(entry.P_ID.ToString().PadLeft(6));
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //sb.Append("entry.hash = ");
-            //foreach (Entry entry in results)
-            //{
-            //    sb.Append(entry.hash.ToString().PadLeft(6));
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //sb.Append("entry.key  = ");
-            //foreach (Entry entry in results)
-            //{
-            //    sb.Append(entry.key.ToString().PadLeft(6));
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //File.WriteAllText(filePath, sb.ToString());
 
             kernelID = fluidCS.FindKernel("CalculateOffsetsCS");
             fluidCS.SetBuffer(kernelID, "_KeyBuffer", keyBuffer);
@@ -243,43 +190,6 @@ namespace Reference
             fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
             uint[] offsets = new uint[numParticles];
             LUTBuffer.GetData(offsets);
-
-            //string filePath = "output.txt";
-            //StringBuilder sb = new StringBuilder();
-            //sb.Append("entry.P_ID = ");
-            //foreach (Entry entry in results)
-            //{
-            //    sb.Append(entry.P_ID.ToString());
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //sb.Append("entry.hash = ");
-            //foreach (Entry entry in results)
-            //{
-            //    sb.Append(entry.hash.ToString());
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //sb.Append("entry.key  = ");
-            //foreach (Entry entry in results)
-            //{
-            //    sb.Append(entry.key.ToString());
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //sb.Append("offset     = ");
-            //foreach (uint offset in offsets)
-            //{
-            //    sb.Append(offset.ToString().PadLeft(6));
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-
-            //File.WriteAllText(filePath, sb.ToString());
-            //for (int i = 0; i < numParticles; i++)
-            //{
-            //    Debug.Log("outsets[" + i + "] = " + offsets[i]);
-            //}
         }
 
         /// <summary>
