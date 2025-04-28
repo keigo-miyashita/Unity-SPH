@@ -103,7 +103,6 @@ inline float CalculateCompressiblePressure(
     float density // 密度
 ) {
     return _GasConstant * (density - _RestDensity);
-    // return max(_GasConstant * (density - _RestDensity), 0.0f);
 }
 
 /// 微圧縮性の実装．（SPH は体積保存性が担保されない．これを改善するための手法）
@@ -114,7 +113,6 @@ inline float CalculatePressure(
     float density // 密度
 ) {
     return _PressureStiffness * max(pow(density / _RestDensity, 7) - 1.0f, 0.0f);
-    // return _PressureStiffness * pow(density / _RestDensity, 7) - 1.0f;
 }
 
 /// Spiky カーネルの実装
