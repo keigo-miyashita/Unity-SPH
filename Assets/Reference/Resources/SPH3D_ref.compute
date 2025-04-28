@@ -66,15 +66,9 @@ RWStructuredBuffer <uint> _LUTBuffer;
 // 密度場を格納する3Dテクスチャ
 RWTexture3D<float> _DensityMapTexure;
 
-// Debug用ループカウンタ
-RWStructuredBuffer <uint> _LoopCounterBuffer;
-
-
-
-
 // シェーダ定数の定義 ----------------------------
 cbuffer CB {
-    int    _NumParticles;       // 粒子数
+    uint    _NumParticles;       // 粒子数
     float  _TimeStep;           // 時間刻み幅 (dt)
     float  _Smoothlen;          // 粒子半径
     float  _GasConstant;        // ガス定数
@@ -87,12 +81,11 @@ cbuffer CB {
     float  _Viscosity;          // 粘性係数
     float3 _Gravity;            // 重力
     float3 _Range;              // シミュレーション空間
+    uint3 _DensityMapSize;      // 各軸方向の格子点数
 
     float3 _MousePos;           // マウス位置
     float  _MouseRadius;        // マウスインタラクションの半径
     bool   _MouseDown;          // マウスが押されているか
-
-    uint3 _DensityMapSize;      // 各軸方向の格子点数
 };
 
 /// Poly6 カーネルの実装
@@ -110,6 +103,7 @@ inline float CalculateCompressiblePressure(
     float density // 密度
 ) {
     return _GasConstant * (density - _RestDensity);
+    // return max(_GasConstant * (density - _RestDensity), 0.0f);
 }
 
 /// 微圧縮性の実装．（SPH は体積保存性が担保されない．これを改善するための手法）
@@ -161,8 +155,6 @@ void DensityCS(uint3 DTid : SV_DispatchThreadID) {
         return;
     }
 
-    // _LoopCounterBuffer[P_ID] = 0; // Debug
-
     float h_sq = _Smoothlen * _Smoothlen;
     float4 P_position = _ParticlesBufferRead[P_ID].position;
 
@@ -178,7 +170,6 @@ void DensityCS(uint3 DTid : SV_DispatchThreadID) {
 
         // 影響半径内に収まっている粒子のみ計算．
         if (r_sq < h_sq) {
-            // _LoopCounterBuffer[P_ID]++; // Debug
             density += CalculateDensity(r_sq);
         }
     }
@@ -326,7 +317,9 @@ void IntegrateCS(uint3 DTid : SV_DispatchThreadID) {
     _ParticlesBufferWrite[P_ID].velocity = velocity;
 }
 
+//------------------------------------------------------------
 // ハッシュ値をバッファに記録
+// -----------------------------------------------------------
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void RegisterHashCS(uint3 DTid : SV_DispatchThreadID)
 {
@@ -336,7 +329,7 @@ void RegisterHashCS(uint3 DTid : SV_DispatchThreadID)
     }
     
     _LUTBuffer[P_ID] = _NumParticles;
-    int3 cell = GetCell(_ParticlesBufferRead[P_ID].position, _Smoothlen);
+    int3 cell = GetCell(_ParticlesBufferRead[P_ID].position.xyz, _Smoothlen);
     uint hash = GetHash(cell);
     uint key = GetKey(hash, _NumParticles);
 
@@ -345,7 +338,9 @@ void RegisterHashCS(uint3 DTid : SV_DispatchThreadID)
     _KeyBuffer[P_ID].key = key;
 }
 
+//------------------------------------------------------------
 // ルックアップテーブルを作成
+// -----------------------------------------------------------
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void CalculateOffsetsCS(uint DTid : SV_DispatchThreadID)
 {
@@ -355,7 +350,7 @@ void CalculateOffsetsCS(uint DTid : SV_DispatchThreadID)
     }
 
     uint key = _KeyBuffer[i].key;
-    uint keyPrev = i == 0 ? _NumParticles : _KeyBuffer[i - 1].key;
+    uint keyPrev = (i == 0) ? _NumParticles : _KeyBuffer[i - 1].key;
     
     if (key != keyPrev) {
         _LUTBuffer[key] = i;
@@ -363,7 +358,7 @@ void CalculateOffsetsCS(uint DTid : SV_DispatchThreadID)
 }
 
 //-------------------------------------------------------
-//密度の算出
+//密度の算出（近傍探索）
 //-------------------------------------------------------
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void DensityNeighborCS(uint3 DTid : SV_DispatchThreadID) {
@@ -372,12 +367,10 @@ void DensityNeighborCS(uint3 DTid : SV_DispatchThreadID) {
         return;
     }
 
-    _LoopCounterBuffer[P_ID] = 0; // Debug
-
     float h_sq = _Smoothlen * _Smoothlen;
     float4 P_position = _ParticlesBufferRead[P_ID].position;
 
-    int3 cell = GetCell(P_position, _Smoothlen);
+    int3 cell = GetCell(P_position.xyz, _Smoothlen);
     uint hash = GetHash(cell);
     uint key = GetKey(hash, _NumParticles);
 
@@ -386,8 +379,8 @@ void DensityNeighborCS(uint3 DTid : SV_DispatchThreadID) {
     for (uint i = 0; i < 27; i++) {
         int3 offset = offsets3D[i];
         int3 neighborCell = cell + offset;
-        int neighborHash = GetHash(neighborCell);
-        int neighborKey = GetKey(neighborHash, _NumParticles);
+        uint neighborHash = GetHash(neighborCell);
+        uint neighborKey = GetKey(neighborHash, _NumParticles);
         uint currentIndex = _LUTBuffer[neighborKey];
 
         while (currentIndex < _NumParticles) {
@@ -406,7 +399,6 @@ void DensityNeighborCS(uint3 DTid : SV_DispatchThreadID) {
 
             // 影響半径内に収まっている粒子のみ計算．
             if (r_sq < h_sq) {
-                // _LoopCounterBuffer[P_ID]++; // Debug
                 density += CalculateDensity(r_sq);
             }
         }
@@ -417,7 +409,7 @@ void DensityNeighborCS(uint3 DTid : SV_DispatchThreadID) {
 }
 
 //------------------------------------------------------------
-// 力（加速度）の算出
+// 力（加速度）の算出（近傍探索）
 // -----------------------------------------------------------
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void ForceNeighborCS(uint3 DTid : SV_DispatchThreadID) {
@@ -433,7 +425,7 @@ void ForceNeighborCS(uint3 DTid : SV_DispatchThreadID) {
 
     const float h_sq = _Smoothlen * _Smoothlen;
 
-    int3 cell = GetCell(P_position, _Smoothlen);
+    int3 cell = GetCell(P_position.xyz, _Smoothlen);
     uint hash = GetHash(cell);
     uint key = GetKey(hash, _NumParticles);
 
@@ -443,8 +435,8 @@ void ForceNeighborCS(uint3 DTid : SV_DispatchThreadID) {
     for (uint i = 0; i < 27; i++) {
         int3 offset = offsets3D[i];
         int3 neighborCell = cell + offset;
-        int neighborHash = GetHash(neighborCell);
-        int neighborKey = GetKey(neighborHash, _NumParticles);
+        uint neighborHash = GetHash(neighborCell);
+        uint neighborKey = GetKey(neighborHash, _NumParticles);
         uint currentIndex = _LUTBuffer[neighborKey];
 
         while (currentIndex < _NumParticles) {
@@ -481,11 +473,12 @@ void ForceNeighborCS(uint3 DTid : SV_DispatchThreadID) {
     _ParticlesForceBufferWrite[P_ID].acceleration = force / P_density;
 }
 
+// 格子点上での密度を計算
 float DensityAtGridPoint(float3 pos)
 {
     float h_sq = _Smoothlen * _Smoothlen;
 
-    int3 cell = GetCell(pos, _Smoothlen);
+    int3 cell = GetCell(pos.xyz, _Smoothlen);
     uint hash = GetHash(cell);
     uint key = GetKey(hash, _NumParticles);
 
@@ -494,8 +487,8 @@ float DensityAtGridPoint(float3 pos)
     for (uint i = 0; i < 27; i++) {
         int3 offset = offsets3D[i];
         int3 neighborCell = cell + offset;
-        int neighborHash = GetHash(neighborCell);
-        int neighborKey = GetKey(neighborHash, _NumParticles);
+        uint neighborHash = GetHash(neighborCell);
+        uint neighborKey = GetKey(neighborHash, _NumParticles);
         uint currentIndex = _LUTBuffer[neighborKey];
 
         while (currentIndex < _NumParticles) {
@@ -504,8 +497,6 @@ float DensityAtGridPoint(float3 pos)
             if (neighborEntry.key != neighborKey) break;
             if (neighborEntry.hash != neighborHash) continue;
 
-            // _LoopCounterBuffer[key]++;
-            
             uint N_ID = neighborEntry.P_ID;
             float4 N_position = _ParticlesBufferRead[N_ID].position;
 
@@ -521,6 +512,9 @@ float DensityAtGridPoint(float3 pos)
     return density;
 }
 
+//------------------------------------------------------------
+// 密度場を計算
+// -----------------------------------------------------------
 [numthreads(8, 8, 8)]
 void DensityMapCS(uint3 DTid : SV_DispatchThreadID)
 {

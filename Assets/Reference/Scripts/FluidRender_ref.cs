@@ -27,11 +27,19 @@ namespace Reference
         Particle,
         MC
     };
+
+    public enum RenderMaterial
+    {
+        Diffuse,
+        Fresnel
+    };
     [RequireComponent(typeof(Fluid3D_ref))]
     public class FluidRender_ref : MonoBehaviour
     {
         [SerializeField] RenderOption renderOption = RenderOption.Particle;
-        [SerializeField] Material fluidMat;
+        [SerializeField] RenderMaterial renderMaterial = RenderMaterial.Diffuse;
+        [SerializeField] Material diffuse;
+        [SerializeField] Material fresnel;
         [SerializeField] Color col;
         [SerializeField] float isoLevel = -2;
         #region Parameters
@@ -49,32 +57,29 @@ namespace Reference
         public Mesh InstanceMesh;
         // 描画のためのマテリアルの参照
         public Material InstanceRenderMat;
-        private static readonly int THREAD_SIZES = 8;
+
         #endregion
 
         #region Private Valiables
-
+        private static readonly int THREAD_SIZES = 8;
         // GPUインスタンシングのための引数 (ComputeBuffer への転送用)
         // インスタンスあたりのインデックス数，インスタンス数，
         // 開始インデックス位置，ベース頂点位置，インスタンスの開始位置
         uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
         // GPUインスタンシングのための引数バッファ
-        ComputeBuffer argsBuffer;
+        ComputeBuffer particleArgsBuffer;
 
         ComputeShader marchingCubeCS;
-
         ComputeBuffer lutBuffer;
         ComputeBuffer triangleBuffer;
         ComputeBuffer renderArgsBuffer;
-        ComputeBuffer debugDensityMapBuffer;
         #endregion
 
 
         #region MonoBehabior Functions
-        // Start is called before the first frame update
         void Start()
         {
-            argsBuffer = new ComputeBuffer(1, args.Length * sizeof(uint), ComputeBufferType.IndirectArguments);
+            particleArgsBuffer = new ComputeBuffer(1, args.Length * sizeof(uint), ComputeBufferType.IndirectArguments);
 
             marchingCubeCS = Resources.Load<ComputeShader>("MarchingCube_ref");
             string lutString = Resources.Load<TextAsset>("MarchingCubesLUT").text;
@@ -82,18 +87,16 @@ namespace Reference
             int[] lutValus = lutString.Trim().Split(',').Select(x => int.Parse(x)).ToArray();
             lutBuffer = new ComputeBuffer(lutValus.Length, Marshal.SizeOf(typeof(int)));
             lutBuffer.SetData(lutValus);
-            CreateTriangleBuffer(Solver.densityMapResolution);
+            CreateTriangleBuffer(Solver.DensityMapResolution);
             renderArgsBuffer = new ComputeBuffer(5, Marshal.SizeOf(typeof(int)), ComputeBufferType.IndirectArguments);
-            debugDensityMapBuffer = new ComputeBuffer(Solver.densityMapResolution * Solver.densityMapResolution, Marshal.SizeOf(typeof(float)));
         }
 
-        // Update is called once per frame
         void Update()
         {
             if (renderOption == RenderOption.Particle)
             {
                 // メッシュをインスタンシング
-                RenderInstancedMesh();
+                RenderParticleMesh();
             }
             else if (renderOption == RenderOption.MC)
             {
@@ -105,14 +108,17 @@ namespace Reference
         void OnDisable()
         {
             // 引数バッファを開放
-            if (argsBuffer != null)
-                argsBuffer.Release();
-            argsBuffer = null;
+            if (particleArgsBuffer != null)
+                particleArgsBuffer.Release();
+            particleArgsBuffer = null;
         }
         #endregion
 
         #region Private Functions
-        void RenderInstancedMesh()
+        /// <summary>
+        /// 粒子で可視化する関数
+        /// </summary>
+        void RenderParticleMesh()
         {
             if (InstanceRenderMat == null || Solver == null || !SystemInfo.supportsInstancing)
                 return;
@@ -120,7 +126,7 @@ namespace Reference
             uint numIndecies = (InstanceMesh != null) ? (uint)InstanceMesh.GetIndexCount(0) : 0;
             args[0] = numIndecies;
             args[1] = (uint)Solver.NumParticles;
-            argsBuffer.SetData(args);
+            particleArgsBuffer.SetData(args);
 
             // Boidデータを格納したバッファをマテリアルにセット
             InstanceRenderMat.SetBuffer("_ParticleDataBuffer", Solver.ParticlesBufferRead);
@@ -139,44 +145,49 @@ namespace Reference
                 0,
                 InstanceRenderMat,
                 bounds,
-                argsBuffer
+                particleArgsBuffer
             );
         }
 
+        /// <summary>
+        /// マーチングキューブを実行する関数
+        /// </summary>
         void RunMarchingCube()
         {
             triangleBuffer.SetCounterValue(0);
             int kernelID = -1;
 
-            int numVoxelsPerX = Solver.densityMapTexture.width - 1;
-            int numVoxelsPerY = Solver.densityMapTexture.height - 1;
-            int numVoxelsPerZ = Solver.densityMapTexture.volumeDepth - 1;
+            int numVoxelsPerX = Solver.DensityMapSize.x - 1;
+            int numVoxelsPerY = Solver.DensityMapSize.y - 1;
+            int numVoxelsPerZ = Solver.DensityMapSize.z - 1;
 
             kernelID = marchingCubeCS.FindKernel("MarchingCubeCS");
 
-            marchingCubeCS.SetInts("_DensityMapSize", Solver.densityMapTexture.width, Solver.densityMapTexture.height, Solver.densityMapTexture.volumeDepth);
+            marchingCubeCS.SetInts("_DensityMapSize", Solver.DensityMapSize.x, Solver.DensityMapSize.y, Solver.DensityMapSize.z);
             marchingCubeCS.SetFloat("_IsoLevel", isoLevel);
-            marchingCubeCS.SetVector("_Range", Solver.range);
+            marchingCubeCS.SetVector("_Range", Solver.GetSimulationAreaSize());
 
             marchingCubeCS.SetBuffer(kernelID, "_TrianglesBuffer", triangleBuffer);
             marchingCubeCS.SetBuffer(kernelID, "_LutBuffer", lutBuffer);
-            marchingCubeCS.SetTexture(kernelID, "_DensityMapTexture", Solver.densityMapTexture);
-            marchingCubeCS.SetBuffer(kernelID, "_DebugDensityMapBuffer", debugDensityMapBuffer);
-            //marchingCubeCS.SetFloats("_Range", Solver.range.x, Solver.range.y, Solver.range.z);
-            //marchingCubeCS.SetVector("_Range", new Vector3(Solver.range.x, Solver.range.y, Solver.range.z));
-            //marchingCubeCS.SetVector("_Range", new Vector4(Solver.range.x, Solver.range.y, Solver.range.z, 1.0f));
-            //marchingCubeCS.SetInts("_DensityMapSize", Solver.densityMapTexture.width, Solver.densityMapTexture.height, Solver.densityMapTexture.volumeDepth);
-            //marchingCubeCS.SetFloat("_IsoLevel", isoLevel);
-            //marchingCubeCS.SetVector("_Range", Solver.range);
-            //marchingCubeCS.SetFloats("_Range", Solver.range.x, Solver.range.y, Solver.range.z);
+            marchingCubeCS.SetTexture(kernelID, "_DensityMapTexture", Solver.DensityMapTexture);
 
             marchingCubeCS.Dispatch(kernelID, numVoxelsPerX / THREAD_SIZES + 1, numVoxelsPerY / THREAD_SIZES + 1, numVoxelsPerZ / THREAD_SIZES + 1);
         }
 
+        /// <summary>
+        /// 生成したメッシュを描画する関数
+        /// </summary>
         void RenderIsoMesh()
         {
-            fluidMat.SetBuffer("_VertexBuffer", triangleBuffer);
-            fluidMat.SetColor("col", col);
+            if (renderMaterial == RenderMaterial.Diffuse)
+            {
+                diffuse.SetBuffer("_VertexBuffer", triangleBuffer);
+                diffuse.SetColor("col", col);
+            }
+            else
+            {
+                fresnel.SetBuffer("_VertexBuffer", triangleBuffer);
+            }
 
             int kernelID = -1;
             kernelID = marchingCubeCS.FindKernel("SetRenderArgsCS");
@@ -188,12 +199,18 @@ namespace Reference
             var bounds = new Bounds
             (
                 center,
-                Solver.GetSimulationAreaSize() * 10f
+                Solver.GetSimulationAreaSize()
             );
 
             ComputeBuffer.CopyCount(triangleBuffer, renderArgsBuffer, 0);
             marchingCubeCS.Dispatch(kernelID, 1, 1, 1);
-            Graphics.DrawProceduralIndirect(fluidMat, bounds, MeshTopology.Triangles, renderArgsBuffer);
+            if (renderMaterial == RenderMaterial.Diffuse)
+            {
+                Graphics.DrawProceduralIndirect(diffuse, bounds, MeshTopology.Triangles, renderArgsBuffer);
+            } else
+            {
+                Graphics.DrawProceduralIndirect(fresnel, bounds, MeshTopology.Triangles, renderArgsBuffer);
+            }
         }
 
         void CreateTriangleBuffer(int resolution)
@@ -224,7 +241,6 @@ namespace Reference
             DeleteBuffer(lutBuffer);
             DeleteBuffer(triangleBuffer);
             DeleteBuffer(renderArgsBuffer);
-            DeleteBuffer(debugDensityMapBuffer);
         }
         #endregion
 

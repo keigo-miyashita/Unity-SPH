@@ -27,8 +27,6 @@ SamplerState linearClampSampler;
 // 間接描画用のバッファ
 RWStructuredBuffer<uint> _RenderArgsBuffer;
 
-RWStructuredBuffer<float> _DebugDensityMapBuffer;
-
 // Offset into the look up table where the indices for each of the 256 cube configurations are stored
 static const int offsets[256] = {0, 0, 3, 6, 12, 15, 21, 27, 36, 39, 45, 51, 60, 66, 75, 84, 90, 93, 99, 105, 114, 120, 129, 138, 150, 156, 165, 174, 186, 195, 207, 219, 228, 231, 237, 243, 252, 258, 267, 276, 288, 294, 303, 312, 324, 333, 345, 357, 366, 372, 381, 390, 396, 405, 417, 429, 438, 447, 459, 471, 480, 492, 507, 522, 528, 531, 537, 543, 552, 558, 567, 576, 588, 594, 603, 612, 624, 633, 645, 657, 666, 672, 681, 690, 702, 711, 723, 735, 750, 759, 771, 783, 798, 810, 825, 840, 852, 858, 867, 876, 888, 897, 909, 915, 924, 933, 945, 957, 972, 984, 999, 1008, 1014, 1023, 1035, 1047, 1056, 1068, 1083, 1092, 1098, 1110, 1125, 1140, 1152, 1167, 1173, 1185, 1188, 1191, 1197, 1203, 1212, 1218, 1227, 1236, 1248, 1254, 1263, 1272, 1284, 1293, 1305, 1317, 1326, 1332, 1341, 1350, 1362, 1371, 1383, 1395, 1410, 1419, 1425, 1437, 1446, 1458, 1467, 1482, 1488, 1494, 1503, 1512, 1524, 1533, 1545, 1557, 1572, 1581, 1593, 1605, 1620, 1632, 1647, 1662, 1674, 1683, 1695, 1707, 1716, 1728, 1743, 1758, 1770, 1782, 1791, 1806, 1812, 1827, 1839, 1845, 1848, 1854, 1863, 1872, 1884, 1893, 1905, 1917, 1932, 1941, 1953, 1965, 1980, 1986, 1995, 2004, 2010, 2019, 2031, 2043, 2058, 2070, 2085, 2100, 2106, 2118, 2127, 2142, 2154, 2163, 2169, 2181, 2184, 2193, 2205, 2217, 2232, 2244, 2259, 2268, 2280, 2292, 2307, 2322, 2328, 2337, 2349, 2355, 2358, 2364, 2373, 2382, 2388, 2397, 2409, 2415, 2418, 2427, 2433, 2445, 2448, 2454, 2457, 2460};
 // The number of indices (3 per triangle) for each of the 256 cube configurations
@@ -46,49 +44,37 @@ cbuffer CB {
     float3 _Range;              // シミュレーション空間
 };
 
-// cbuffer CB {
-//     int    _NumParticles;       // 粒子数
-//     float  _TimeStep;           // 時間刻み幅 (dt)
-//     float  _Smoothlen;          // 粒子半径
-//     float  _GasConstant;        // ガス定数
-//     float  _PressureStiffness;  // Tait 式の圧力定数
-//     float  _RestDensity;        // 静止密度
-//     float  _DensityCoef;        // 密度算出時に使うカーネル関数の係数
-//     float  _GradPressureCoef;   // 圧力算出時に使うカーネル関数の係数
-//     float  _LapViscosityCoef;   // 粘性算出時に使うカーネル関数の係数
-//     float  _WallStiffness;      // ペナルティ法の押し返す力
-//     float  _Viscosity;          // 粘性係数
-//     float3 _Gravity;            // 重力
-//     float3 _Range;              // シミュレーション空間
-//     uint3 _DensityMapSize;
-//     float _IsoLevel;
-// };
 
+//------------------------------------------------------------
+// 密度場から密度をサンプリング
+// -----------------------------------------------------------
 float SampleDensity(uint3 GP_ID)
 {
     bool isEdge = any(GP_ID <= 0 || GP_ID >= _DensityMapSize - 1);
-    float3 uvw = GP_ID / (float3)(_DensityMapSize  - 1);
-    if (GP_ID.y == 4 && GP_ID.z == 4) {
-        // _DebugDensityMapBuffer[GP_ID.x] = _DensityMapTexture.Load(int4(GP_ID, 0));
-        _DebugDensityMapBuffer[GP_ID.x] = _DensityMapTexture.SampleLevel(linearClampSampler, uvw, 0);
-    }
     if (isEdge) return _IsoLevel;
-    // float3 uvw = GP_ID / (float3)(_DensityMapSize  - 1);
-    // return _DensityMapTexture.Load(int4(GP_ID, 0));
+    float3 uvw = (float3)GP_ID / (float3)(_DensityMapSize  - 1);
     return -_DensityMapTexture.SampleLevel(linearClampSampler, uvw, 0);
 }
 
-float3 IDToWorld(int3 corner_ID)
+//------------------------------------------------------------
+// 格子点のIDから
+// -----------------------------------------------------------
+float3 IDToWorld(uint3 corner_ID)
 {
-    return (float3(corner_ID) / (_DensityMapSize - 1.0));
+    return (float3)(corner_ID) / (float3)(_DensityMapSize - 1.0);
 }
 
-float3 CalculateNormal(int3 corner_ID)
+//------------------------------------------------------------
+// 法線を計算
+// -----------------------------------------------------------
+float3 CalculateNormal(uint3 corner_ID)
 {
-    int3 offsetX = int3(1, 0, 0);
-    int3 offsetY = int3(0, 1, 0);
-    int3 offsetZ = int3(0, 0, 1);
+    uint3 offsetX = uint3(1, 0, 0);
+    uint3 offsetY = uint3(0, 1, 0);
+    uint3 offsetZ = uint3(0, 0, 1);
 
+    // 密度場の勾配が法線に対応
+    // 密度の中心差分を計算
     float dx = SampleDensity(corner_ID + offsetX) - SampleDensity(corner_ID - offsetX);
     float dy = SampleDensity(corner_ID + offsetY) - SampleDensity(corner_ID - offsetY);
     float dz = SampleDensity(corner_ID + offsetZ) - SampleDensity(corner_ID - offsetZ);
@@ -96,7 +82,10 @@ float3 CalculateNormal(int3 corner_ID)
     return normalize(float3(dx, dy, dz));
 }
 
-Vertex CreateVertex(int3 corner_ID_A, int3 corner_ID_B)
+//------------------------------------------------------------
+// 頂点座標，法線を補完して生成
+// -----------------------------------------------------------
+Vertex CreateVertex(uint3 corner_ID_A, uint3 corner_ID_B)
 {
     float3 posA = IDToWorld(corner_ID_A);
     float3 posB = IDToWorld(corner_ID_B);
@@ -116,27 +105,29 @@ Vertex CreateVertex(int3 corner_ID_A, int3 corner_ID_B)
     return vertex;
 }
 
+//------------------------------------------------------------
+// マーチングキューブ法
+// -----------------------------------------------------------
 [numthreads(8, 8, 8)]
 void MarchingCubeCS(uint3 DTid : SV_DispatchThreadID)
 {
-    // uint3 test = _Range;
-    int3 numCubesPerAxis = _DensityMapSize - 1;
+    uint3 numCubesPerAxis = _DensityMapSize - 1;
     if (DTid.x >= numCubesPerAxis.x || DTid.y >= numCubesPerAxis.y || DTid.z >= numCubesPerAxis.z) {
         return;
     }
 
-    int3 GP_ID = DTid;
+    uint3 GP_ID = DTid;
     
     // 注目しているセルを構成する8つの格子点のIDを計算
-    int3 corner_ID[8];
-    corner_ID[0] = GP_ID + int3(0, 0, 0);
-    corner_ID[1] = GP_ID + int3(1, 0, 0);
-    corner_ID[2] = GP_ID + int3(1, 0, 1);
-    corner_ID[3] = GP_ID + int3(0, 0, 1);
-    corner_ID[4] = GP_ID + int3(0, 1, 0);
-    corner_ID[5] = GP_ID + int3(1, 1, 0);
-    corner_ID[6] = GP_ID + int3(1, 1, 1);
-    corner_ID[7] = GP_ID + int3(0, 1, 1);
+    uint3 corner_ID[8];
+    corner_ID[0] = GP_ID + uint3(0, 0, 0);
+    corner_ID[1] = GP_ID + uint3(1, 0, 0);
+    corner_ID[2] = GP_ID + uint3(1, 0, 1);
+    corner_ID[3] = GP_ID + uint3(0, 0, 1);
+    corner_ID[4] = GP_ID + uint3(0, 1, 0);
+    corner_ID[5] = GP_ID + uint3(1, 1, 0);
+    corner_ID[6] = GP_ID + uint3(1, 1, 1);
+    corner_ID[7] = GP_ID + uint3(0, 1, 1);
 
     // 密度場を参照し，対応するパターンのインデックスを取得
     int cubePatternID = 0;
@@ -172,43 +163,17 @@ void MarchingCubeCS(uint3 DTid : SV_DispatchThreadID)
         tri.vertexA = vertexC;
         tri.vertexB = vertexB;
         tri.vertexC = vertexA;
-        // float currentDensity = SampleDensity(uint3(1, 1, 1));
-        // tri.vertexA.position = float4(currentDensity, currentDensity, currentDensity, currentDensity);
-        // tri.vertexA.normal = float4(currentDensity, currentDensity, currentDensity, currentDensity);
-        // tri.vertexB.position = float4(currentDensity, currentDensity, currentDensity, currentDensity);
-        // tri.vertexB.normal = float4(currentDensity, currentDensity, currentDensity, currentDensity);
-        // tri.vertexC.position = float4(currentDensity, currentDensity, currentDensity, currentDensity);
-        // tri.vertexC.normal = float4(currentDensity, currentDensity, currentDensity, currentDensity);
-        // tri.vertexA.position = float4(0.0f, 0.0f, 0.0f, 1.0f);
-        // tri.vertexA.normal = float4(0.0f, 0.0f, -1.0f, 1.0f);
-        // tri.vertexB.position = float4(6.0f, 0.0f, 0.0f, 1.0f);
-        // tri.vertexB.normal = float4(0.0f, 0.0f, -1.0f, 1.0f);
-        // tri.vertexC.position = float4(6.0f, 6.0f, 0.0f, 1.0f);
-        // tri.vertexC.normal = float4(0.0f, 0.0f, -1.0f, 1.0f);
-        // tri.vertexA.position = float4(corner_ID[start0], 1.0f);
-        // tri.vertexA.normal = float4(corner_ID[end0], 1.0f);
-        // tri.vertexB.position = float4(corner_ID[start1], 1.0f);
-        // tri.vertexB.normal = float4(corner_ID[end1], 1.0f);
-        // tri.vertexC.position = float4(corner_ID[start2], 1.0f);
-        // tri.vertexC.normal = float4(corner_ID[end2], 1.0f);
         _TrianglesBuffer.Append(tri);
     }
-    // if (DTid.x == 0 && DTid.y == 0 && DTid.z == 0) {
-    //     Triangle tri;
-    //     tri.vertexA.position = float4(0.0f, 0.0f, 0.0f, 1.0f);
-    //     tri.vertexA.normal = float4(0.0f, 0.0f, -1.0f, 1.0f);
-    //     tri.vertexB.position = float4(6.0f, 0.0f, 0.0f, 1.0f);
-    //     tri.vertexB.normal = float4(0.0f, 0.0f, -1.0f, 1.0f);
-    //     tri.vertexC.position = float4(6.0f, 6.0f, 0.0f, 1.0f);
-    //     tri.vertexC.normal = float4(0.0f, 0.0f, -1.0f, 1.0f);
-    //     _TrianglesBuffer.Append(tri);
-    // }
 }
 
+//------------------------------------------------------------
+// メッシュを間接描画するための引数を計算
+// -----------------------------------------------------------
 [numthreads(1, 1, 1)]
 void SetRenderArgsCS(uint3 DTid : SV_DispatchThreadID)
 {
-    _RenderArgsBuffer[0] *= 3;
+    _RenderArgsBuffer[0] *= 3; // CPU側でコピーしたポリゴン数 * 3
     _RenderArgsBuffer[1] = 1;
     _RenderArgsBuffer[2] = 0;
     _RenderArgsBuffer[3] = 0;

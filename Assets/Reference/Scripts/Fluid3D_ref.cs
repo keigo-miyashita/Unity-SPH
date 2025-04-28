@@ -27,20 +27,34 @@ namespace Reference
         [SerializeField] private Vector3 initVelocity = new Vector3(0f, 0f, 0f);
         [SerializeField] private Material gridMaterial = null;
         [SerializeField] private int particlesPerAxis = 0;
-        [SerializeField] public int densityMapResolution = 150;
-        [SerializeField, Range(0, 149)] private int sliceIndex = 0;
+        [SerializeField] private int densityMapResolution = 150;
 
+        private static readonly int THREAD_SIZES = 8;
         private bool isMouseDown;
         private Vector4 hittedYPlanePos;
-        //private int particlesPerAxis;
-        private GameObject cube = null;
-        private static readonly int THREAD_SIZES = 8;
+        private GameObject cube = null; // シミュレーション領域可視化用
+        private RenderTexture densityMapTexture; // 密度場を格納する3Dテクスチャ
+        private int3 densityMapSize; // 密度場のxyz方向の分割数
 
-        public RenderTexture densityMapTexture;
-        private int3 densityMapSize;
+        #region Accessor
+        public RenderTexture DensityMapTexture
+        {
+            get { return densityMapTexture; }
+        }
 
-        private Texture3D copyTexture;
+        public int3 DensityMapSize
+        {
+            get { return densityMapSize; }
+        }
 
+        public int DensityMapResolution
+        {
+            get { return densityMapResolution; }
+        }
+
+        #endregion
+
+        #region MonoBehabior Functions
         protected override void Awake()
         {
             base.Awake();
@@ -55,6 +69,8 @@ namespace Reference
             base.Start();
             InitDensityTex();
         }
+
+        #endregion
 
         /// <summary>
         /// パーティクル数を求める．
@@ -77,7 +93,7 @@ namespace Reference
         }
 
         /// <summary>
-        /// パーティクルの初期位置を球形に，初速を0に初期化．
+        /// パーティクルの初期位置，初速を初期化．
         /// </summary>
         /// <param name="particles"></param>
         protected override void InitParticleData(ref FluidParticle[] particles)
@@ -125,7 +141,7 @@ namespace Reference
         /// <summary>
         /// 密度バッファを初期化する
         /// </summary>
-        /// <param name="densitymap"></param>
+        /// <param name=""></param>
         void InitDensityTex()
         {
             float maxAxis = Mathf.Max(range.x, range.y, range.z);
@@ -147,6 +163,9 @@ namespace Reference
             densityMapTexture.filterMode = FilterMode.Bilinear;
         }
 
+        /// <summary>
+        /// 密度場計算用のメソッド
+        /// </summary>
         protected override void UpdateDensityMap(ComputeShader cs)
         {
             int kernelID = -1;
@@ -159,27 +178,9 @@ namespace Reference
             cs.SetBuffer(kernelID, "_KeyBuffer", keyBuffer);
             cs.SetBuffer(kernelID, "_LUTBuffer", LUTBuffer);
             cs.SetTexture(kernelID, "_DensityMapTexure", densityMapTexture);
-            cs.SetBuffer(kernelID, "_LoopCounterBuffer", loopCounterBuffer);
             cs.SetInts("_DensityMapSize", densityMapSize.x, densityMapSize.y, densityMapSize.z);
             cs.SetVector("_Range", range);
             cs.Dispatch(kernelID, densityMapSize.x / THREAD_SIZES + 1, densityMapSize.y / THREAD_SIZES + 1 , densityMapSize.z / THREAD_SIZES + 1);
-
-            //uint[] results = new uint[numParticles];
-            //loopCounterBuffer.GetData(results);
-            //string filePath = "output_map_counter.txt";
-            //StringBuilder sb = new StringBuilder();
-            //sb.Append("loopCounter = ");
-            //foreach (uint result in results)
-            //{
-            //    sb.Append(result.ToString());
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-
-            //File.WriteAllText(filePath, sb.ToString());
-
-            //Debug.Log("test");
-            //ShowSlice();
         }
 
         /// <summary>
@@ -212,45 +213,6 @@ namespace Reference
             cs.SetFloat("_MouseRadius", MouseInteractionRadius);
             cs.SetBool("_MouseDown", isMouseDown);
             cs.SetInts("_DensityMapSize", densityMapSize.x, densityMapSize.y, densityMapSize.z);
-        }
-
-        public void ShowSlice() // Debug
-        {
-            int width = densityMapTexture.width;
-            int height = densityMapTexture.height;
-            int depth = densityMapTexture.volumeDepth;
-            Debug.Log("depth = " + depth);
-            Texture2D slice = new Texture2D(width, height, TextureFormat.RHalf, false);
-
-            string filePath = "output_texture3d.txt";
-            StringBuilder sb = new StringBuilder();
-            sb.Append("density = ");
-            for (int z = 0; z < 1; z++)
-            {
-                Graphics.CopyTexture(densityMapTexture, z, slice, 0); // 2Dスライス単位でコピー
-                UnityEngine.Color[] pixels = slice.GetPixels();
-                for (int y = 0; y < height; y++)
-                {
-                    for (int x = 0; x < width; x++)
-                    {
-                        int index = y * width + x;
-                        float density = pixels[index].r; // R16_SFloatなのでrチャネルだけが有効
-                        sb.Append(density.ToString());
-                        sb.Append(" ");
-                        Debug.Log($"Density[{x}, {y}, {z}] = {density}");
-                    }
-                }
-            }
-            File.WriteAllText(filePath, sb.ToString());
-            //Debug.Log("densityMapTexture = " + slice.GetPixel(10, 0).r);
-            //slice.Apply();
-            //GUI.DrawTexture(new Rect(10, 10, 150, 150), slice);
-            //GUI.Label(new Rect(10, 10, 150, 150), sliceIndex.ToString());
-        }
-
-        public void OnGUI()
-        {
-            //ShowSlice(sliceIndex);
         }
     }
 }

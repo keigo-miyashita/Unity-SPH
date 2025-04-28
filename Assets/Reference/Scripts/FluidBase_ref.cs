@@ -59,7 +59,7 @@ namespace Reference
         [SerializeField] protected float wallStiffness = 3000.0f;
         [SerializeField] protected int iterations = 5;
         [SerializeField] protected Vector3 gravity = new Vector3(0f, -9.8f, 0f);
-        [SerializeField] public Vector3 range = new Vector3(6f, 6f, 6f);
+        [SerializeField] protected Vector3 range = new Vector3(6f, 6f, 6f);
         [SerializeField] protected bool drawSimulationGrid = true;
 
         protected int numParticles;                                                           // パーティクルの個数．
@@ -83,7 +83,6 @@ namespace Reference
         protected ComputeBuffer particlesForceBuffer;
         protected ComputeBuffer keyBuffer;
         protected ComputeBuffer LUTBuffer;
-        protected ComputeBuffer loopCounterBuffer; // Debug
 
         #endregion
 
@@ -102,7 +101,7 @@ namespace Reference
         }
         #endregion
 
-        #region Mono
+        #region MonoBehabior Functions
         protected virtual void Awake()
         {
             fluidCS = (ComputeShader)Resources.Load("SPH3D_ref");
@@ -143,13 +142,6 @@ namespace Reference
 
             AdditionalCSParams(fluidCS);
 
-            if (frame == 0)
-            {
-                //CreateLookUpTable();
-                //RunFluidSolver();
-                //RunFluidSolverWithNeighborhoodSearch();
-            }
-
             // 複数回イテレーション．
             for (int i = 0; i < iterations; i++)
             {
@@ -157,11 +149,6 @@ namespace Reference
                 RunFluidSolverWithNeighborhoodSearch();
             }
             UpdateDensityMap(fluidCS);
-            //RunFluidSolverWithNeighborhoodSearch();
-            if (frame == 0)
-            {
-                //UpdateDensityMap(fluidCS);
-            }
             frame++;
         }
 
@@ -174,7 +161,6 @@ namespace Reference
             DeleteBuffer(particlesForceBuffer);
             DeleteBuffer(keyBuffer);
             DeleteBuffer(LUTBuffer);
-            DeleteBuffer(loopCounterBuffer); // Debug
         }
         #endregion Mono
 
@@ -308,33 +294,7 @@ namespace Reference
             kernelID = fluidCS.FindKernel("DensityCS");
             fluidCS.SetBuffer(kernelID, "_ParticlesBufferRead", particlesBufferRead);
             fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferWrite", particlesDensityBuffer);
-            fluidCS.SetBuffer(kernelID, "_LoopCounterBuffer", loopCounterBuffer); // Debug
             fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
-
-            //FluidParticleDensity[] results = new FluidParticleDensity[numParticles];
-            //particlesDensityBuffer.GetData(results);
-            //string filePath = "output_density.txt";
-            //StringBuilder sb = new StringBuilder();
-            //sb.Append("result.Density = ");
-            //foreach (FluidParticleDensity result in results)
-            //{
-            //    sb.Append(result.Density.ToString());
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //uint[] results = new uint[numParticles];
-            //loopCounterBuffer.GetData(results);
-            //string filePath = "output_density_counter.txt";
-            //StringBuilder sb = new StringBuilder();
-            //sb.Append("loopCounter = ");
-            //foreach (uint result in results)
-            //{
-            //    sb.Append(result.ToString());
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-
-            //File.WriteAllText(filePath, sb.ToString());
 
             //// 圧力の計算
             //kernelID = fluidCS.FindKernel("PressureWeakCompressibleCS");
@@ -368,7 +328,7 @@ namespace Reference
         }
 
         /// <summary>
-        /// 近傍探索を用いた流体シミュレーションメインルーチン
+        /// 流体シミュレーションメインルーチン（近傍探索版）
         /// </summary>
         private void RunFluidSolverWithNeighborhoodSearch()
         {
@@ -383,52 +343,13 @@ namespace Reference
             fluidCS.SetBuffer(kernelID, "_LUTBuffer", LUTBuffer);
             fluidCS.SetBuffer(kernelID, "_ParticlesBufferRead", particlesBufferRead);
             fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferWrite", particlesDensityBuffer);
-            fluidCS.SetBuffer(kernelID, "_LoopCounterBuffer", loopCounterBuffer); // Debug
             fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
 
-            //FluidParticleDensity[] densityResults = new FluidParticleDensity[numParticles];
-            //particlesDensityBuffer.GetData(densityResults);
-            //string filePath = "output_density_neighbor.txt";
-            //StringBuilder sb = new StringBuilder();
-            //sb.Append("result.Density = ");
-            //foreach (FluidParticleDensity result in densityResults)
-            //{
-            //    sb.Append(result.Density.ToString());
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //File.WriteAllText(filePath, sb.ToString());
-            //sb.Clear();
-            //uint[] results = new uint[numParticles];
-            //LUTBuffer.GetData(results);
-            //string filePath = "output_LUT_density_neighbor.txt";
-            //StringBuilder sb = new StringBuilder();
-            //sb.Append("result.Density = ");
-            //foreach (uint result in results)
-            //{
-            //    sb.Append(result.ToString());
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //uint[] results = new uint[numParticles];
-            //loopCounterBuffer.GetData(results);
-            //filePath = "output_density_counter_neighbor.txt";
-            ////StringBuilder sb = new StringBuilder();
-            //sb.Append("loopCounter = ");
-            //foreach (uint result in results)
-            //{
-            //    sb.Append(result.ToString());
-            //    sb.Append(" ");
-            //}
-            //sb.AppendLine();
-            //File.WriteAllText(filePath, sb.ToString());
-
-
-            ////// 圧力の計算
-            ////kernelID = fluidCS.FindKernel("PressureWeakCompressibleCS");
-            ////fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferRead", particlesDensityBuffer);
-            ////fluidCS.SetBuffer(kernelID, "_ParticlesPressureBufferWrite", particlesPressureBuffer);
-            ////fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
+            //// 圧力の計算
+            //kernelID = fluidCS.FindKernel("PressureWeakCompressibleCS");
+            //fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferRead", particlesDensityBuffer);
+            //fluidCS.SetBuffer(kernelID, "_ParticlesPressureBufferWrite", particlesPressureBuffer);
+            //fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
 
             // 圧力の計算
             kernelID = fluidCS.FindKernel("PressureCompressibleCS");
@@ -476,6 +397,12 @@ namespace Reference
         protected abstract void InitParticleData(ref T[] particles);
 
         /// <summary>
+        /// 密度場計算用のメソッド
+        /// </summary>
+        /// <param name="shader"></param>
+        protected virtual void UpdateDensityMap(ComputeShader shader) { }
+
+        /// <summary>
         /// バッファの初期化
         /// </summary>
         private void InitBuffers()
@@ -492,8 +419,6 @@ namespace Reference
             particlesForceBuffer = new ComputeBuffer(numParticles, Marshal.SizeOf(typeof(FluidParticleForce)));
             keyBuffer = new ComputeBuffer(numParticles, Marshal.SizeOf(typeof(uint3)));
             LUTBuffer = new ComputeBuffer(numParticles, Marshal.SizeOf(typeof(uint)));
-
-            loopCounterBuffer = new ComputeBuffer(numParticles, Marshal.SizeOf(typeof(uint))); // Debug
         }
 
         /// <summary>
@@ -505,12 +430,6 @@ namespace Reference
             ping = pong;
             pong = temp;
         }
-
-        /// <summary>
-        /// 密度場計算用のメソッド
-        /// </summary>
-        /// <param name="shader"></param>
-        protected virtual void UpdateDensityMap(ComputeShader shader) { }
 
         /// <summary>
         /// バッファの開放
