@@ -81,8 +81,8 @@ namespace Reference
         {
             particleArgsBuffer = new ComputeBuffer(1, args.Length * sizeof(uint), ComputeBufferType.IndirectArguments);
 
-            marchingCubeCS = Resources.Load<ComputeShader>("MarchingCube_ref");
-            string lutString = Resources.Load<TextAsset>("MarchingCubesLUT").text;
+            marchingCubeCS = Resources.Load<ComputeShader>("Computes/MarchingCube_ref");
+            string lutString = Resources.Load<TextAsset>("Texts/MarchingCubesLUT").text;
             Debug.Log(lutString);
             int[] lutValus = lutString.Trim().Split(',').Select(x => int.Parse(x)).ToArray();
             lutBuffer = new ComputeBuffer(lutValus.Length, Marshal.SizeOf(typeof(int)));

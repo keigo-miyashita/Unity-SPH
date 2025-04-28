@@ -165,13 +165,19 @@ MonoBehaviour:
   m_GameObject: {fileID: 359813423}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 44532f782e8714b47a81db5ef5ea4cab, type: 3}
+  m_Script: {fileID: 11500000, guid: 9aaef3f4870dfdd439211ebaa86a4dbe, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  renderOption: 1
+  renderMaterial: 1
+  diffuse: {fileID: 2100000, guid: 3e14ea7cb35753c4b978df8565eb8643, type: 2}
+  fresnel: {fileID: 2100000, guid: 7c301ea6b113b944fa57a4531498abfe, type: 2}
+  col: {r: 0.05882353, g: 0.35686275, b: 0.92156863, a: 0}
+  isoLevel: -2
   ObjectScale: {x: 0.1, y: 0.1, z: 0.1}
   Solver: {fileID: 359813426}
   InstanceMesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
-  InstanceRenderMat: {fileID: 2100000, guid: 3a8b29fe14fd9374fb8da7e8168bc6fb, type: 2}
+  InstanceRenderMat: {fileID: 2100000, guid: 21930da18c8d4c548928c2c290d92ec4, type: 2}
 --- !u!114 &359813426
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -181,22 +187,33 @@ MonoBehaviour:
   m_GameObject: {fileID: 359813423}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 439d2eb23ecb4b9458261c955515e2e6, type: 3}
+  m_Script: {fileID: 11500000, guid: 324f3e4e2d4f49f499a4b2ed467ef3d2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  particleNum: 16384
-  smoothlen: 0.5
-  pressureStiffness: 0.57
-  restDensity: 2
-  particleMass: 0.002
-  viscosity: 0.1
+  particleNum: 1024
+  smoothlen: 0.15
+  gasConstant: 1
+  pressureStiffness: 200
+  restDensity: 600
+  particleMass: 0.02
+  viscosity: 0.5
   maxAllowableTimestep: 0.005
-  wallStiffness: 10000
-  iterations: 4
+  wallStiffness: 2000
+  iterations: 5
   gravity: {x: 0, y: -9.8, z: 0}
-  range: {x: 4, y: 4, z: 4}
-  ballRadius: 1
+  range: {x: 9, y: 9, z: 6}
+  drawSimulationGrid: 1
+  initOption: 1
+  initDensity: 600
+  ballRadius: 0.5
+  initBoxRegion: {x: 3, y: 3, z: 3}
+  initBoxCenter: {x: 0.1, y: 0.2, z: 0.1}
   MouseInteractionRadius: 1
+  jitterStrength: 0.035
+  initVelocity: {x: 0, y: 0, z: 0}
+  gridMaterial: {fileID: 2100000, guid: a7434abdbb8061348a53e7d1ac5a0bfb, type: 2}
+  particlesPerAxis: 0
+  densityMapResolution: 150
 --- !u!1 &758609044
 GameObject:
   m_ObjectHideFlags: 0
@@ -233,7 +250,7 @@ Camera:
   m_GameObject: {fileID: 758609044}
   m_Enabled: 1
   serializedVersion: 2
-  m_ClearFlags: 2
+  m_ClearFlags: 1
   m_BackGroundColor: {r: 0.7169812, g: 0.7169812, b: 0.7169812, a: 0}
   m_projectionMatrixMode: 1
   m_GateFitMode: 2
@@ -322,7 +339,7 @@ Light:
   serializedVersion: 10
   m_Type: 1
   m_Shape: 0
-  m_Color: {r: 1, g: 0.95686275, b: 0.8392157, a: 1}
+  m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_Intensity: 1
   m_Range: 10
   m_SpotAngle: 30

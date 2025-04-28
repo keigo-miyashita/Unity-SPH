@@ -104,7 +104,7 @@ namespace Reference
         #region MonoBehabior Functions
         protected virtual void Awake()
         {
-            fluidCS = (ComputeShader)Resources.Load("SPH3D_ref");
+            fluidCS = (ComputeShader)Resources.Load("Computes/SPH3D_ref");
         }
 
         protected virtual void Start()

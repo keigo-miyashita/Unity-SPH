@@ -204,7 +204,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1b907b5c4efbf1540864a0dc4f8de8ae, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  renderOption: 1
+  renderOption: 0
   renderMaterial: 1
   diffuse: {fileID: 2100000, guid: c168c1ff7ef97fc43aa70ae86a9cb4ed, type: 2}
   fresnel: {fileID: 2100000, guid: bafc952a4d39f64468855cdddac08d8d, type: 2}
@@ -213,7 +213,7 @@ MonoBehaviour:
   ObjectScale: {x: 0.15, y: 0.15, z: 0.15}
   Solver: {fileID: 359813425}
   InstanceMesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
-  InstanceRenderMat: {fileID: 2100000, guid: e6108a9f7903b6f4aa3ccfd32d10281e, type: 2}
+  InstanceRenderMat: {fileID: 2100000, guid: 21930da18c8d4c548928c2c290d92ec4, type: 2}
 --- !u!1 &758609044
 GameObject:
   m_ObjectHideFlags: 0
