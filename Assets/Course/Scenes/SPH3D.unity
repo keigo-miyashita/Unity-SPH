@@ -168,10 +168,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9aaef3f4870dfdd439211ebaa86a4dbe, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  renderOption: 1
+  renderOption: 0
   renderMaterial: 1
-  diffuse: {fileID: 2100000, guid: 3e14ea7cb35753c4b978df8565eb8643, type: 2}
-  fresnel: {fileID: 2100000, guid: 7c301ea6b113b944fa57a4531498abfe, type: 2}
+  diffuse: {fileID: 2100000, guid: 8b1359bffc57c5a458b0060d3fb9c32e, type: 2}
+  fresnel: {fileID: 2100000, guid: efb6ab6ae227c524fae4843018ee58a6, type: 2}
   col: {r: 0.05882353, g: 0.35686275, b: 0.92156863, a: 0}
   isoLevel: -2
   ObjectScale: {x: 0.1, y: 0.1, z: 0.1}
@@ -203,6 +203,7 @@ MonoBehaviour:
   gravity: {x: 0, y: -9.8, z: 0}
   range: {x: 9, y: 9, z: 6}
   drawSimulationGrid: 1
+  searchType: 1
   initOption: 1
   initDensity: 600
   ballRadius: 0.5

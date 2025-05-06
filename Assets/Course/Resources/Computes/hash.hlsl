@@ -36,15 +36,15 @@ static const uint hash3 = 440817757;
 // 粒子の位置からセルのインデックスを取得
 inline int3 GetCell(float3 position, float gridSize)
 {
-    // return (int3)floor(/*粒子が所属するセルを計算*/);
-	return 0; // エラー回避用．実装時に削除．
+    return (int3)floor(position / gridSize);
 }
 
 // セルの位置からハッシュを計算
 inline uint GetHash(int3 cell)
 {
-    const uint blockSize = 50; // 50セルで1ブロックとする
-    uint3 ucell = (uint3)(cell + blockSize / 2); // セルが負にならないようオフセットを加算
+    // 50セルで1ブロックとする
+    const uint blockSize = 50;
+    uint3 ucell = (uint3)(cell + blockSize / 2);
 
     // ブロック内のインデックス
     uint3 localCell = ucell % blockSize;

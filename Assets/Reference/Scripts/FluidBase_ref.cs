@@ -46,14 +46,26 @@ namespace Reference
         public uint key;
     }
 
+    public enum SearchType
+    {
+        Exhaustive,
+        Neighborhood
+    }
+
+    public enum PressureType
+    {
+        Compressible,
+        WeakCompressible
+    }
+
     public abstract class FluidBase_ref<T> : MonoBehaviour where T : struct
     {
-        [SerializeField] protected int particleNum = 1024;   // パーティクルの個数．
-        [SerializeField] protected float smoothlen = 0.15f;                               // 粒子半径． 
-        [SerializeField] protected float gasConstant = 10.0f;                               // ガス定数．
-        [SerializeField] protected float pressureStiffness = 200.0f;                          // 圧力項係数．
-        [SerializeField] protected float restDensity = 1000.0f;                             // 静止密度．
-        [SerializeField] protected float particleMass = 0.02f;                           // 粒子質量．
+        [SerializeField] protected int particleNum = 1024;           // パーティクルの個数．
+        [SerializeField] protected float smoothlen = 0.15f;          // 粒子半径． 
+        [SerializeField] protected float gasConstant = 10.0f;        // ガス定数．
+        [SerializeField] protected float pressureStiffness = 200.0f; // 非圧縮性で計算する際利用する圧力項係数．
+        [SerializeField] protected float restDensity = 1000.0f;      // 静止密度．
+        [SerializeField] protected float particleMass = 0.02f;       // 粒子質量．
         [SerializeField] protected float viscosity = 1.04f;
         [SerializeField] protected float maxAllowableTimestep = 0.005f;
         [SerializeField] protected float wallStiffness = 3000.0f;
@@ -61,12 +73,17 @@ namespace Reference
         [SerializeField] protected Vector3 gravity = new Vector3(0f, -9.8f, 0f);
         [SerializeField] protected Vector3 range = new Vector3(6f, 6f, 6f);
         [SerializeField] protected bool drawSimulationGrid = true;
+        [SerializeField] protected SearchType searchType = SearchType.Exhaustive;
 
-        protected int numParticles;                                                           // パーティクルの個数．
-        protected float timeStep;                                                             // 時間刻み幅．
-        protected float densityCoef;                                                          // Poly6 カーネルの密度係数．            
-        protected float gradPressureCoef;                                                     // Spiky カーネルの密度係数．
-        protected float lapViscosityCoef;                                                     // Laplacian カーネルの密度係数．
+
+        protected int numParticles;    // パーティクルの個数．
+        protected float timeStep;      // 時間刻み幅．
+        protected float poly6Coef;     // Poly6 カーネルの密度係数．            
+        protected float spikyCoef;     // Spiky カーネルの密度係数．
+        protected float viscosityCoef; // Laplacian カーネルの密度係数．
+
+        // 圧力計算のオプション．弱圧縮性の式を実装した場合，ここをIncompressibleにする．
+        private PressureType pressureType = PressureType.Compressible;
 
         #region Debug
         protected uint frame = 0;
@@ -99,6 +116,11 @@ namespace Reference
         {
             return this.range;
         }
+
+        public SearchType SearchType
+        {
+            get { return searchType; }
+        }
         #endregion
 
         #region MonoBehabior Functions
@@ -121,9 +143,9 @@ namespace Reference
             // カーネル関数における係数の計算（3D）．
             // 参考：Muller et al. Particle-based fluid simulation for interactive applications, SCA, July 2003
             // https://dl.acm.org/doi/10.5555/846276.846298
-            densityCoef = particleMass * 315f / (64f * Mathf.PI * Mathf.Pow(smoothlen, 9));
-            gradPressureCoef = particleMass * -45f / (Mathf.PI * Mathf.Pow(smoothlen, 6));
-            lapViscosityCoef = particleMass * 45f / (Mathf.PI * Mathf.Pow(smoothlen, 6));
+            poly6Coef = 315f / (64f * Mathf.PI * Mathf.Pow(smoothlen, 9));
+            spikyCoef = -45f / (Mathf.PI * Mathf.Pow(smoothlen, 6));
+            viscosityCoef = 45f / (Mathf.PI * Mathf.Pow(smoothlen, 6));
 
             // シェーダ定数の転送．
             fluidCS.SetInt("_NumParticles", numParticles);
@@ -132,10 +154,11 @@ namespace Reference
             fluidCS.SetFloat("_GasConstant", gasConstant);
             fluidCS.SetFloat("_PressureStiffness", pressureStiffness);
             fluidCS.SetFloat("_RestDensity", restDensity);
+            fluidCS.SetFloat("_ParticleMass", particleMass);
             fluidCS.SetFloat("_Viscosity", viscosity);
-            fluidCS.SetFloat("_DensityCoef", densityCoef);
-            fluidCS.SetFloat("_GradPressureCoef", gradPressureCoef);
-            fluidCS.SetFloat("_LapViscosityCoef", lapViscosityCoef);
+            fluidCS.SetFloat("_Poly6Coef", poly6Coef);
+            fluidCS.SetFloat("_SpikyCoef", spikyCoef);
+            fluidCS.SetFloat("_ViscosityCoef", viscosityCoef);
             fluidCS.SetFloat("_WallStiffness", wallStiffness);
             fluidCS.SetVector("_Range", range);
             fluidCS.SetVector("_Gravity", gravity);
@@ -145,8 +168,13 @@ namespace Reference
             // 複数回イテレーション．
             for (int i = 0; i < iterations; i++)
             {
-                //RunFluidSolver();
-                RunFluidSolverWithNeighborhoodSearch();
+                if (searchType == SearchType.Exhaustive)
+                {
+                    RunFluidSolver();
+                } else if (searchType == SearchType.Neighborhood)
+                {
+                    RunFluidSolverWithNeighborhoodSearch();
+                }
             }
             UpdateDensityMap(fluidCS);
             frame++;
@@ -180,16 +208,14 @@ namespace Reference
             fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
 
             Entry[] results = new Entry[numParticles];
-            keyBuffer.GetData(results);
-            Array.Sort(results, (a, b) => a.key.CompareTo(b.key));
-            keyBuffer.SetData(results);
+            keyBuffer.GetData(results); // keyBufferからデータをリードバック
+            Array.Sort(results, (a, b) => a.key.CompareTo(b.key)); // 読み込んだデータをソート
+            keyBuffer.SetData(results); // ソート結果をアップロード
 
             kernelID = fluidCS.FindKernel("CalculateOffsetsCS");
             fluidCS.SetBuffer(kernelID, "_KeyBuffer", keyBuffer);
             fluidCS.SetBuffer(kernelID, "_LUTBuffer", LUTBuffer);
             fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
-            uint[] offsets = new uint[numParticles];
-            LUTBuffer.GetData(offsets);
         }
 
         /// <summary>
@@ -206,19 +232,24 @@ namespace Reference
             fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferWrite", particlesDensityBuffer);
             fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
 
-            //// 圧力の計算
-            //kernelID = fluidCS.FindKernel("PressureWeakCompressibleCS");
-            //fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferRead", particlesDensityBuffer);
-            //fluidCS.SetBuffer(kernelID, "_ParticlesPressureBufferWrite", particlesPressureBuffer);
-            //fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
+            if (pressureType == PressureType.Compressible)
+            {
+                // 圧縮性を仮定した圧力の計算
+                kernelID = fluidCS.FindKernel("PressureCompressibleCS");
+                fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferRead", particlesDensityBuffer);
+                fluidCS.SetBuffer(kernelID, "_ParticlesPressureBufferWrite", particlesPressureBuffer);
+                fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
+            }
+            else if (pressureType == PressureType.WeakCompressible)
+            {
+                // 非圧縮性を仮定した圧力の計算
+                kernelID = fluidCS.FindKernel("PressureWeakCompressibleCS");
+                fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferRead", particlesDensityBuffer);
+                fluidCS.SetBuffer(kernelID, "_ParticlesPressureBufferWrite", particlesPressureBuffer);
+                fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
+            }
 
-            // 圧力の計算
-            kernelID = fluidCS.FindKernel("PressureCompressibleCS");
-            fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferRead", particlesDensityBuffer);
-            fluidCS.SetBuffer(kernelID, "_ParticlesPressureBufferWrite", particlesPressureBuffer);
-            fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
-
-            // 外力の計算
+            // 圧力項・粘性項の計算
             kernelID = fluidCS.FindKernel("ForceCS");
             fluidCS.SetBuffer(kernelID, "_ParticlesBufferRead", particlesBufferRead);
             fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferRead", particlesDensityBuffer);
@@ -226,7 +257,7 @@ namespace Reference
             fluidCS.SetBuffer(kernelID, "_ParticlesForceBufferWrite", particlesForceBuffer);
             fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
 
-            // 位置更新
+            // 外力項計算・位置更新
             kernelID = fluidCS.FindKernel("IntegrateCS");
             fluidCS.SetBuffer(kernelID, "_ParticlesBufferRead", particlesBufferRead);
             fluidCS.SetBuffer(kernelID, "_ParticlesForceBufferRead", particlesForceBuffer);
@@ -255,19 +286,24 @@ namespace Reference
             fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferWrite", particlesDensityBuffer);
             fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
 
-            //// 圧力の計算
-            //kernelID = fluidCS.FindKernel("PressureWeakCompressibleCS");
-            //fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferRead", particlesDensityBuffer);
-            //fluidCS.SetBuffer(kernelID, "_ParticlesPressureBufferWrite", particlesPressureBuffer);
-            //fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
+            if (pressureType == PressureType.Compressible)
+            {
+                // 圧縮性を仮定した圧力の計算
+                kernelID = fluidCS.FindKernel("PressureCompressibleCS");
+                fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferRead", particlesDensityBuffer);
+                fluidCS.SetBuffer(kernelID, "_ParticlesPressureBufferWrite", particlesPressureBuffer);
+                fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
+            }
+            else if (pressureType == PressureType.WeakCompressible)
+            {
+                // 非圧縮性を仮定した圧力の計算
+                kernelID = fluidCS.FindKernel("PressureWeakCompressibleCS");
+                fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferRead", particlesDensityBuffer);
+                fluidCS.SetBuffer(kernelID, "_ParticlesPressureBufferWrite", particlesPressureBuffer);
+                fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
+            }
 
-            // 圧力の計算
-            kernelID = fluidCS.FindKernel("PressureCompressibleCS");
-            fluidCS.SetBuffer(kernelID, "_ParticlesDensityBufferRead", particlesDensityBuffer);
-            fluidCS.SetBuffer(kernelID, "_ParticlesPressureBufferWrite", particlesPressureBuffer);
-            fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
-
-            // 外力の計算
+            // 圧力項・粘性項の計算
             kernelID = fluidCS.FindKernel("ForceNeighborCS");
             fluidCS.SetBuffer(kernelID, "_KeyBuffer", keyBuffer);
             fluidCS.SetBuffer(kernelID, "_LUTBuffer", LUTBuffer);
@@ -277,7 +313,7 @@ namespace Reference
             fluidCS.SetBuffer(kernelID, "_ParticlesForceBufferWrite", particlesForceBuffer);
             fluidCS.Dispatch(kernelID, threadGroupX, 1, 1);
 
-            // 位置更新
+            // 外力項計算・位置更新
             kernelID = fluidCS.FindKernel("IntegrateCS");
             fluidCS.SetBuffer(kernelID, "_ParticlesBufferRead", particlesBufferRead);
             fluidCS.SetBuffer(kernelID, "_ParticlesForceBufferRead", particlesForceBuffer);

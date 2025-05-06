@@ -32,9 +32,9 @@ namespace Reference
         private static readonly int THREAD_SIZES = 8;
         private bool isMouseDown;
         private Vector4 hittedYPlanePos;
-        private GameObject cube = null; // シミュレーション領域可視化用
+        private GameObject cube = null;          // シミュレーション領域可視化用
         private RenderTexture densityMapTexture; // 密度場を格納する3Dテクスチャ
-        private int3 densityMapSize; // 密度場のxyz方向の分割数
+        private int3 densityMapSize;             // 密度場のxyz方向の分割数
 
         #region Accessor
         public RenderTexture DensityMapTexture
@@ -81,7 +81,7 @@ namespace Reference
             int targetParticleCount = 0;
             if (initOption == InitOption.Sphere)
             {
-                targetParticleCount = (int)(4 / 3 * Mathf.PI * initDensity);
+                targetParticleCount = (int)((4 / 3 * Mathf.PI * initDensity) / particleMass);
             } else if (initOption == InitOption.Cube)
             {
                 targetParticleCount = (int)(initBoxRegion.x * initBoxRegion.y * initBoxRegion.z * initDensity);
@@ -128,9 +128,7 @@ namespace Reference
                             float pz = (tz - 0.5f) * initBoxRegion.z + initBoxRegion.z / 2 + initBoxCenter.z;
                             Vector3 jitter = UnityEngine.Random.insideUnitSphere * jitterStrength;
                             particles[i].Position = new Vector3(px, py, pz) + jitter;
-                            //Debug.Log("position = " + particles[i].Position);
                             particles[i].Velocity = initVelocity;
-                            //Debug.Log("i = " + i);
                             i++;
                         }
                     }

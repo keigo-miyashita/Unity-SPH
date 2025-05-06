@@ -83,7 +83,6 @@ namespace Reference
 
             marchingCubeCS = Resources.Load<ComputeShader>("Computes/MarchingCube_ref");
             string lutString = Resources.Load<TextAsset>("Texts/MarchingCubesLUT").text;
-            Debug.Log(lutString);
             int[] lutValus = lutString.Trim().Split(',').Select(x => int.Parse(x)).ToArray();
             lutBuffer = new ComputeBuffer(lutValus.Length, Marshal.SizeOf(typeof(int)));
             lutBuffer.SetData(lutValus);
@@ -93,6 +92,10 @@ namespace Reference
 
         void Update()
         {
+            if (Solver.SearchType == SearchType.Exhaustive)
+            {
+                renderOption = RenderOption.Particle;
+            }
             if (renderOption == RenderOption.Particle)
             {
                 // メッシュをインスタンシング

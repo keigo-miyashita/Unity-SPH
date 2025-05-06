@@ -1,6 +1,6 @@
-﻿#pragma enable_d3d11_debug_symbols
+﻿// デバッグ時有効にすると逆コンパイル可能になる
+// #pragma enable_d3d11_debug_symbols
 
-// Each #kernel tells which function to compile; you can have many kernels
 #pragma kernel DensityCS
 #pragma kernel PressureCompressibleCS
 #pragma kernel PressureWeakCompressibleCS
@@ -70,13 +70,14 @@ RWTexture3D<float> _DensityMapTexure;
 cbuffer CB {
     uint    _NumParticles;       // 粒子数
     float  _TimeStep;           // 時間刻み幅 (dt)
-    float  _Smoothlen;          // 粒子半径
+    float  _Smoothlen;          // サポート半径
     float  _GasConstant;        // ガス定数
     float  _PressureStiffness;  // Tait 式の圧力定数
     float  _RestDensity;        // 静止密度
-    float  _DensityCoef;        // 密度算出時に使うカーネル関数の係数
-    float  _GradPressureCoef;   // 圧力算出時に使うカーネル関数の係数
-    float  _LapViscosityCoef;   // 粘性算出時に使うカーネル関数の係数
+    float  _ParticleMass;       // 粒子の重さ
+    float  _Poly6Coef;          // 密度算出時に使うpoly6カーネル関数の係数
+    float  _SpikyCoef;          // 圧力算出時に使うspikyカーネル関数の係数
+    float  _ViscosityCoef;      // 粘性算出時に使うviscosityカーネル関数の係数
     float  _WallStiffness;      // ペナルティ法の押し返す力
     float  _Viscosity;          // 粘性係数
     float3 _Gravity;            // 重力
@@ -89,13 +90,14 @@ cbuffer CB {
 };
 
 /// Poly6 カーネルの実装
-/// 参考：[Muller et al. 2003] Muller et al.: Particle based fluid simulation for interactive applications, SCA, July 2003
+/// 参考：[Muller et al. 2003]
+/// Muller et al.: Particle based fluid simulation for interactive applications, SCA, July 2003
 /// https://dl.acm.org/doi/10.5555/846276.846298
 inline float CalculateDensity(
     float r_sq // 粒子間距離の2乗．
 ) {
     const float h_sq = _Smoothlen * _Smoothlen;
-    return _DensityCoef * (h_sq - r_sq) * (h_sq - r_sq) * (h_sq - r_sq);
+    return _ParticleMass * _Poly6Coef * (h_sq - r_sq) * (h_sq - r_sq) * (h_sq - r_sq);
 }
 
 /// 圧力方程式の実装．（非圧縮性を考慮しない）
@@ -125,8 +127,8 @@ inline float4 CalculateGradPressure(
     float4 diff         // 自分から相手へ向かうベクトル
 ) {
     const float h = _Smoothlen;
-    float avg_pressure = 0.5f * (P_pressure + N_pressure);
-    return _GradPressureCoef * avg_pressure / (N_density + 0.001f) * (h - r) * (h - r) / (r + 0.001f) * diff;
+    float avg_pressure = 0.5f * (P_pressure + N_pressure); // 平均圧力を計算
+    return _ParticleMass * _SpikyCoef * avg_pressure / (N_density + 0.001f) * (h - r) * (h - r) / (r + 0.001f) * diff;
 }
 
 /// Viscosity カーネルの実装
@@ -139,7 +141,7 @@ inline float4 CalculateLapViscosity(
 ) {
     const float h = _Smoothlen;
     float4 vel_diff = (N_velocity - P_velocity);
-    return _LapViscosityCoef / N_density * (h - r) * vel_diff;
+    return _ParticleMass * _ViscosityCoef / N_density * (h - r) * vel_diff;
 }
 
 
@@ -148,7 +150,7 @@ inline float4 CalculateLapViscosity(
 //-------------------------------------------------------
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void DensityCS(uint3 DTid : SV_DispatchThreadID) {
-    const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
+    const uint P_ID = DTid.x;                 // 現在処理している粒子ID
     if (P_ID >= _NumParticles) {
         return;
     }
@@ -156,15 +158,15 @@ void DensityCS(uint3 DTid : SV_DispatchThreadID) {
     float h_sq = _Smoothlen * _Smoothlen;
     float4 P_position = _ParticlesBufferRead[P_ID].position;
 
-    // 近傍探索 (O(n))
+    // 全探索 (O(n))
     float density = 0.0f;
     for (uint N_ID = 0; N_ID < _NumParticles; N_ID++) {
-        float4 N_position = _ParticlesBufferRead[N_ID].position;
+        float4 N_position = _ParticlesBufferRead[N_ID].position; // 近傍粒子の位置
 
         float4 diff = N_position - P_position;  // 自分から相手へ向かうベクトル
         float r_sq = dot(diff, diff);           // 粒子間距離の2乗
 
-        // 影響半径内に収まっている粒子のみ計算．
+        // サポート半径内に収まっている粒子のみ計算．
         if (r_sq < h_sq) {
             density += CalculateDensity(r_sq);
         }
@@ -179,7 +181,7 @@ void DensityCS(uint3 DTid : SV_DispatchThreadID) {
 // -----------------------------------------------------------
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void PressureCompressibleCS(uint3 DTid : SV_DispatchThreadID) {
-    const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
+    const uint P_ID = DTid.x;                 // 現在処理している粒子ID
     if (P_ID >= _NumParticles) {
         return;
     }
@@ -196,7 +198,7 @@ void PressureCompressibleCS(uint3 DTid : SV_DispatchThreadID) {
 // -----------------------------------------------------------
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void PressureWeakCompressibleCS(uint3 DTid : SV_DispatchThreadID) {
-    const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
+    const uint P_ID = DTid.x;                 // 現在処理している粒子ID
     if (P_ID >= _NumParticles) {
         return;
     }
@@ -214,7 +216,7 @@ void PressureWeakCompressibleCS(uint3 DTid : SV_DispatchThreadID) {
 // -----------------------------------------------------------
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void ForceCS(uint3 DTid : SV_DispatchThreadID) {
-    const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
+    const uint P_ID = DTid.x;                 // 現在処理している粒子ID
     if (P_ID >= _NumParticles) {
         return;
     }
@@ -230,15 +232,15 @@ void ForceCS(uint3 DTid : SV_DispatchThreadID) {
     float4 press = float4(0.0f, 0.0f, 0.0f, 0.0f);
     float4 visco = float4(0.0f, 0.0f, 0.0f, 0.0f);
     for (uint N_ID = 0; N_ID < _NumParticles; N_ID++) {
-        float4 N_position = _ParticlesBufferRead[N_ID].position;
+        float4 N_position = _ParticlesBufferRead[N_ID].position; // 近傍粒子の位置
 
-        float4 diff = N_position - P_position;
+        float4 diff = N_position - P_position; // 処理している粒子から近傍粒子へのベクトル
         float r_sq = dot(diff, diff);
 
         if (r_sq < h_sq) {
-            float N_density = _ParticlesDensityBufferRead[N_ID].density;
-            float N_pressure = _ParticlesPressureBufferRead[N_ID].pressure;
-            float4 N_velocity = _ParticlesBufferRead[N_ID].velocity;
+            float N_density = _ParticlesDensityBufferRead[N_ID].density; // 近傍粒子の密度
+            float N_pressure = _ParticlesPressureBufferRead[N_ID].pressure; // 近傍粒子の圧力
+            float4 N_velocity = _ParticlesBufferRead[N_ID].velocity; // 近傍粒子の速度
             float r = sqrt(r_sq);
 
             // 圧力項
@@ -262,7 +264,7 @@ void ForceCS(uint3 DTid : SV_DispatchThreadID) {
 // -----------------------------------------------------------
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void IntegrateCS(uint3 DTid : SV_DispatchThreadID) {
-    const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
+    const uint P_ID = DTid.x;                 // 現在処理している粒子ID
     if (P_ID >= _NumParticles) {
         return;
     }
@@ -306,7 +308,7 @@ void IntegrateCS(uint3 DTid : SV_DispatchThreadID) {
     velocity += _TimeStep * acceleration;
     position += _TimeStep * velocity;
 
-    // パーティクルのバッファ更新
+    // 粒子のバッファ更新
     _ParticlesBufferWrite[P_ID].position = position;
     _ParticlesBufferWrite[P_ID].velocity = velocity;
 }
@@ -317,7 +319,7 @@ void IntegrateCS(uint3 DTid : SV_DispatchThreadID) {
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void RegisterHashCS(uint3 DTid : SV_DispatchThreadID)
 {
-    const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
+    const uint P_ID = DTid.x;                 // 現在処理している粒子ID
     if (P_ID >= _NumParticles) {
         return;
     }
@@ -338,14 +340,18 @@ void RegisterHashCS(uint3 DTid : SV_DispatchThreadID)
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void CalculateOffsetsCS(uint DTid : SV_DispatchThreadID)
 {
-    const uint i = DTid.x;                 // 現在処理しているパーティクルID
+    const uint i = DTid.x;       // 現在処理しているバッファのインデックス
     if (i >= _NumParticles) {
         return;
     }
 
+    // 処理中のインデックスのキーを取得
     uint key = _KeyBuffer[i].key;
+    // 処理中のインデックスの1つ前のキーを取得
     uint keyPrev = (i == 0) ? _NumParticles : _KeyBuffer[i - 1].key;
     
+    // 現在のキー != 1つ前のキーならこのスレッドで処理しているインデックスが
+    // 新たなセルに所属する領域の開始位置
     if (key != keyPrev) {
         _LUTBuffer[key] = i;
     }
@@ -356,40 +362,48 @@ void CalculateOffsetsCS(uint DTid : SV_DispatchThreadID)
 //-------------------------------------------------------
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void DensityNeighborCS(uint3 DTid : SV_DispatchThreadID) {
-    const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
+    const uint P_ID = DTid.x;                 // 現在処理している粒子ID
     if (P_ID >= _NumParticles) {
         return;
     }
-
     float h_sq = _Smoothlen * _Smoothlen;
     float4 P_position = _ParticlesBufferRead[P_ID].position;
-
+    // 処理している粒子のセル，ハッシュ，キーを取得
     int3 cell = GetCell(P_position.xyz, _Smoothlen);
     uint hash = GetHash(cell);
     uint key = GetKey(hash, _NumParticles);
 
+    /*_KeyBuffer*/
+    // スライドの例
+    // 粒子　　：0 1 4 8 9 5 2  3  5  7
+    // ハッシュ：1 2 5 5 5 7 9 10 10 15
+    // キー　　：1 2 5 5 5 7 9 10 10 15
+    /*_LUTBuffer*/
+    // スライドの例
+    // キー  :0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+    // 開始ID:- 0 1 - - 2 - 5 - 6  7  -  -  -  -  9
     // 近傍探索 (O(1))
     float density = 0.0f;
-    for (uint i = 0; i < 27; i++) {
-        int3 offset = offsets3D[i];
-        int3 neighborCell = cell + offset;
-        uint neighborHash = GetHash(neighborCell);
-        uint neighborKey = GetKey(neighborHash, _NumParticles);
-        uint currentIndex = _LUTBuffer[neighborKey];
+    for (uint i = 0; i < 27; i++) { // 3Dでは周囲セルは27個
+        int3 offset = offsets3D[i];                             // 注目セルから周囲セルへのオフセット
+        int3 neighborCell = cell + offset;                      // 周囲セルID
+        uint neighborHash = GetHash(neighborCell);              // 周囲セルからハッシュを取得
+        uint neighborKey = GetKey(neighborHash, _NumParticles); // ハッシュからキーに変換
+        uint currentIndex = _LUTBuffer[neighborKey];            // このループで処理するセルの開始インデックス
 
         while (currentIndex < _NumParticles) {
-            Entry neighborEntry = _KeyBuffer[currentIndex];
+            Entry neighborEntry = _KeyBuffer[currentIndex]; // 粒子データ読み取り
             currentIndex++;
-            if (neighborEntry.key != neighborKey) break;
-            if (neighborEntry.hash != neighborHash) continue;
+            if (neighborEntry.key != neighborKey) break;      // キーが異なる場合このセルの処理を終了
+            if (neighborEntry.hash != neighborHash) continue; // ハッシュが異なる場合スキップ
             
-            uint N_ID = neighborEntry.P_ID;
-            float4 N_position = _ParticlesBufferRead[N_ID].position;
+            uint N_ID = neighborEntry.P_ID; // 周囲粒子ID
+            float4 N_position = _ParticlesBufferRead[N_ID].position; // 周囲粒子位置
 
             float4 diff = N_position - P_position;  // 自分から相手へ向かうベクトル
             float r_sq = dot(diff, diff);           // 粒子間距離の2乗
 
-            // 影響半径内に収まっている粒子のみ計算．
+            // サポート半径内に収まっている粒子のみ計算．
             if (r_sq < h_sq) {
                 density += CalculateDensity(r_sq);
             }
@@ -405,7 +419,7 @@ void DensityNeighborCS(uint3 DTid : SV_DispatchThreadID) {
 // -----------------------------------------------------------
 [numthreads(THREAD_SIZE_X, 1, 1)]
 void ForceNeighborCS(uint3 DTid : SV_DispatchThreadID) {
-    const uint P_ID = DTid.x;                 // 現在処理しているパーティクルID
+    const uint P_ID = DTid.x;                 // 現在処理している粒子ID
     if (P_ID >= _NumParticles) {
         return;
     }
@@ -494,7 +508,7 @@ float DensityAtGridPoint(float3 pos)
 
             float4 diff = N_position - float4(pos, 0.0);  // 自分から相手へ向かうベクトル
             float r_sq = dot(diff, diff);           // 粒子間距離の2乗
-            // 影響半径内に収まっている粒子のみ計算．
+            // サポート半径内に収まっている粒子のみ計算．
             if (r_sq < h_sq) {
                 density += CalculateDensity(r_sq);
             }
@@ -513,7 +527,7 @@ void DensityMapCS(uint3 DTid : SV_DispatchThreadID)
     if (DTid.x >= _DensityMapSize.x || DTid.y >= _DensityMapSize.y || DTid.z >= _DensityMapSize.z) {
         return;
     }
-    float3 texturePos = DTid / (_DensityMapSize - 1.0);
-    float3 gridPointPos = (texturePos) * (_Range);
+    float3 texturePos = DTid / (_DensityMapSize - 1.0); // 正規化（各成分0.0f - 1.0f）
+    float3 gridPointPos = (texturePos) * (_Range);      // シミュレーション空間全体を指すようにスケール
     _DensityMapTexure[DTid] = DensityAtGridPoint(gridPointPos);
 }

@@ -1,4 +1,4 @@
-Shader "Unlit/FluidRender"
+Shader "Unlit/FluidDiffuse"
 {
     Properties
     {

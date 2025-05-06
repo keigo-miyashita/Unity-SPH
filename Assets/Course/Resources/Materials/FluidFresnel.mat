@@ -7,8 +7,8 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: FluidRender_ref
-  m_Shader: {fileID: 4800000, guid: 1092f6a7a14135f41bf1fc80b2d21ec5, type: 3}
+  m_Name: FluidFresnel
+  m_Shader: {fileID: 4800000, guid: 3226059fc501ca64e9c89b9b377d11ab, type: 3}
   m_ValidKeywords: []
   m_InvalidKeywords: []
   m_LightmapFlags: 4
@@ -20,11 +20,14 @@ Material:
   m_SavedProperties:
     serializedVersion: 3
     m_TexEnvs:
-    - _MainTex:
+    - _DiffuseTexture:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     m_Ints: []
-    m_Floats: []
-    m_Colors: []
+    m_Floats:
+    - _RefractiveIndex: 1.33
+    m_Colors:
+    - _DiffuseColor: {r: 1, g: 1, b: 1, a: 1}
+    - _F0: {r: 0.02, g: 0.02, b: 0.02, a: 1}
   m_BuildTextureStacks: []

@@ -1,4 +1,4 @@
-Shader "Unlit/FluidTransparent"
+Shader "Unlit/FluidFresnel_ref"
 {
     Properties
     {
