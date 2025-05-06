@@ -168,17 +168,6 @@ void DensityCS(uint3 DTid : SV_DispatchThreadID) {
 
     // 全探索 (O(n))
     float density = 0.0f;
-    for (uint N_ID = 0; N_ID < _NumParticles; N_ID++) {
-        float4 N_position = _ParticlesBufferRead[N_ID].position; // 近傍粒子の位置
-
-        float4 diff = N_position - P_position;  // 自分から相手へ向かうベクトル
-        float r_sq = dot(diff, diff);           // 粒子間距離の2乗
-
-        // サポート半径内に収まっている粒子のみ計算．
-        if (r_sq < h_sq) {
-            density += CalculateDensity(r_sq);
-        }
-    }
     /*全粒子を探索しサポート半径以内の粒子のみを参照して密度計算*/
 
     // 密度バッファを更新
