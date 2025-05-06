@@ -118,7 +118,6 @@ void MarchingCubeCS(uint3 DTid : SV_DispatchThreadID)
 
     // 左下の格子点のID
     uint3 GP_ID = DTid;
-    
 
     // NOTE : 
     // 注目しているセルを構成する8つの格子点のIDを計算
@@ -141,12 +140,12 @@ void MarchingCubeCS(uint3 DTid : SV_DispatchThreadID)
     }
 
     // NOTE : 
-    // 配列頂点数(lengths)から
+    // 配列 頂点数(lengths)から
     // メッシュのインデックスの数を取得
     int numIndices = 0 /*正しい値に書き換えよう*/;
     // NOTE : 
-    // 配列オフセット(offsets)から
-    // バッファ頂点ID(_LUTBuffer)の読み取り位置のオフセットを取得
+    // 配列 オフセット(offsets)から
+    // 頂点IDバッファ(_LUTBuffer)の読み取り位置のオフセットを取得
     int offset = 0 /*正しい値に書き換えよう*/;
 
     for (int i = 0; i < numIndices; i+= 3) {

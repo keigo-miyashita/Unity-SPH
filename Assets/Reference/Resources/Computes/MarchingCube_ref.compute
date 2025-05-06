@@ -138,11 +138,11 @@ void MarchingCubeCS(uint3 DTid : SV_DispatchThreadID)
         }
     }
 
-    // 配列頂点数(lengths)から
+    // 配列 頂点数(lengths)から
     // メッシュのインデックスの数を取得
     int numIndices = lengths[cubePatternID];
-    // 配列オフセット(offsets)から
-    // バッファ頂点ID(_LUTBuffer)の読み取り位置のオフセットを取得
+    // 配列 オフセット(offsets)から
+    // 頂点IDバッファ(_LUTBuffer)の読み取り位置のオフセットを取得
     int offset = offsets[cubePatternID];
 
     for (int i = 0; i < numIndices; i+= 3) {
