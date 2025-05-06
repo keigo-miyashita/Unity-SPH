@@ -83,9 +83,6 @@ Shader "Unlit/FluidFresnel"
                 float4 refractColor = lightColor * UNITY_SAMPLE_TEXCUBE(unity_SpecCube0, refractDir);
                 
                 float4 col = float4(F, 1.0f) * reflectColor + float4(1 - F, 1.0f) * refractColor;
-                // float4 col = lerp(reflectColor, refractColor, F); // lerpÇÕê¸å`ï‚äÆlinear interpolation
-                // float4 col = UNITY_SAMPLE_TEXCUBE(unity_SpecCube0, reflectDir);
-                // float4 col = UNITY_SAMPLE_TEXCUBE(unity_SpecCube0, refractDir);
 
                 return col;
             }
