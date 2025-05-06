@@ -169,7 +169,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   renderOption: 0
-  renderMaterial: 1
+  renderMaterial: 0
   diffuse: {fileID: 2100000, guid: 8b1359bffc57c5a458b0060d3fb9c32e, type: 2}
   fresnel: {fileID: 2100000, guid: efb6ab6ae227c524fae4843018ee58a6, type: 2}
   col: {r: 0.05882353, g: 0.35686275, b: 0.92156863, a: 0}
