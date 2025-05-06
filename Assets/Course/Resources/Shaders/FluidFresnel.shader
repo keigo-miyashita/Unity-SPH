@@ -73,16 +73,19 @@ Shader "Unlit/FluidFresnel"
 
                 float3 lightDir = normalize(lightPos - worldPos); // 頂点→ライトのベクトル
                 float3 viewDir = normalize(cameraPos - worldPos); // 頂点→カメラのベクトル
-                float3 reflectDir = normalize(reflect(-viewDir, normal)); // reflectの第一引数はライト→頂点なのでマイナスをつける
-                float3 refractDir = normalize(refract(-viewDir, normal, 1.0 / _RefractiveIndex));
+                float3 reflectDir /*= 反射方向を取得*/; // reflectの第一引数はライト→頂点なのでマイナスをつける
+                float3 refractDir /*= 屈折方向を取得*/;
 
-                float cosTheta = dot(viewDir, normal);
-                float3 F = FresnelSchlick(cosTheta, _F0);
+                float cosTheta /*= 視線ベクトルと法線ベクトルが作る角度の余弦*/;
+                float3 F /*= フレネル項を計算 */;
 
-                float4 reflectColor = lightColor * UNITY_SAMPLE_TEXCUBE(unity_SpecCube0, reflectDir);
-                float4 refractColor = lightColor * UNITY_SAMPLE_TEXCUBE(unity_SpecCube0, refractDir);
+                // UNITY_SAMPLE_TEXCUBE(cubeMap, direction)でdirection方向のcubeMapテクスチャをサンプル可能
+                // Unityではゲームビューのキューブマップが組み込み変数unity_SpecCube0に格納されている
+                // lightColorをかけて色にしよう
+                float4 reflectColor /* = */;
+                float4 refractColor /* = */;
                 
-                float4 col = float4(F, 1.0f) * reflectColor + float4(1 - F, 1.0f) * refractColor;
+                float4 col /*= 反射項：屈折率 = F : 1 - Fでブレンド*/;
 
                 return col;
             }
